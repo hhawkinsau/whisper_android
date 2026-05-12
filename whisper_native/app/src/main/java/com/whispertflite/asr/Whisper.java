@@ -5,7 +5,6 @@ import android.util.Log;
 
 import com.whispertflite.engine.WhisperEngine;
 import com.whispertflite.engine.WhisperEngineJava;
-import com.whispertflite.engine.WhisperEngineNative;
 
 import java.io.File;
 import java.io.IOException;
@@ -48,8 +47,7 @@ public class Whisper {
     private volatile boolean taskAvailable = false;
 
     public Whisper(Context context) {
-//        this.mWhisperEngine = new WhisperEngineJava(context);
-        this.mWhisperEngine = new WhisperEngineNative(context);
+        this.mWhisperEngine = new WhisperEngineJava(context);
 
         // Start thread for file transcription for file transcription
         Thread threadTranscbFile = new Thread(this::transcribeFileLoop);

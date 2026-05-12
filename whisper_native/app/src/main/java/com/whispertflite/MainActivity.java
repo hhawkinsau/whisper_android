@@ -33,13 +33,11 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.IntentCompat;
 
-import com.arthenica.ffmpegkit.FFmpegKit;
-import com.arthenica.ffmpegkit.FFmpegSession;
-import com.arthenica.ffmpegkit.ReturnCode;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.whispertflite.asr.Player;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
+import com.whispertflite.utils.AudioExtractionUtil;
 import com.whispertflite.utils.WaveUtil;
 
 import java.io.File;
@@ -510,9 +508,8 @@ public class MainActivity extends AppCompatActivity {
 
         new Thread(() -> {
             try {
-                File cachedVideo = copyUriToCache(videoUri);
                 File wavFile = new File(sdcardDataFolder, EXTRACTED_VIDEO_WAV);
-                extractAudioToWav(cachedVideo, wavFile);
+                extractAudioToWav(videoUri, wavFile);
 
                 VideoSubtitleJob job = new VideoSubtitleJob();
                 job.videoUri = videoUri;
@@ -551,14 +548,9 @@ public class MainActivity extends AppCompatActivity {
         return output;
     }
 
-    private void extractAudioToWav(File videoFile, File wavFile) throws IOException {
-        handler.post(() -> tvStatus.setText("Extracting 16 kHz mono WAV with FFmpeg..."));
-        String command = String.format(Locale.US, "-y -i %s -vn -acodec pcm_s16le -ar 16000 -ac 1 %s",
-                quotePath(videoFile.getAbsolutePath()), quotePath(wavFile.getAbsolutePath()));
-        FFmpegSession session = FFmpegKit.execute(command);
-        if (!ReturnCode.isSuccess(session.getReturnCode())) {
-            throw new IOException("FFmpeg extraction failed: " + session.getFailStackTrace());
-        }
+    private void extractAudioToWav(Uri videoUri, File wavFile) throws IOException {
+        handler.post(() -> tvStatus.setText("Extracting 16 kHz mono WAV with Android media APIs..."));
+        AudioExtractionUtil.extractToWaveFile(this, videoUri, wavFile);
     }
 
     private void finishVideoSubtitleJob(VideoSubtitleJob job) {

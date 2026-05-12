@@ -73,7 +73,7 @@ public class WhisperEngineJava implements WhisperEngine {
     public String transcribeFile(String wavePath) {
         // Calculate Mel spectrogram
         Log.d(TAG, "Calculating Mel spectrogram...");
-        float[] melSpectrogram = getMelSpectrogram(wavePath);
+        float[] melSpectrogram = getMelSpectrogram(WaveUtil.getSamples(wavePath));
         Log.d(TAG, "Mel spectrogram is calculated...!");
 
         // Perform inference
@@ -85,16 +85,18 @@ public class WhisperEngineJava implements WhisperEngine {
 
     @Override
     public String transcribeBuffer(float[] samples) {
-        return null;
+        return runInference(getMelSpectrogram(samples));
     }
 
     // Load TFLite model
     private void loadModel(String modelPath) throws IOException {
-        FileInputStream fileInputStream = new FileInputStream(modelPath);
-        FileChannel fileChannel = fileInputStream.getChannel();
-        long startOffset = 0;
-        long declaredLength = fileChannel.size();
-        ByteBuffer tfliteModel = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
+        ByteBuffer tfliteModel;
+        try (FileInputStream fileInputStream = new FileInputStream(modelPath);
+             FileChannel fileChannel = fileInputStream.getChannel()) {
+            long startOffset = 0;
+            long declaredLength = fileChannel.size();
+            tfliteModel = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
+        }
 
         // Set the number of threads for inference
         Interpreter.Options options = new Interpreter.Options();
@@ -142,10 +144,7 @@ public class WhisperEngineJava implements WhisperEngine {
         mInterpreter = new Interpreter(tfliteModel, options);
     }
 
-    private float[] getMelSpectrogram(String wavePath) {
-        // Get samples in PCM_FLOAT format
-        float[] samples = WaveUtil.getSamples(wavePath);
-
+    private float[] getMelSpectrogram(float[] samples) {
         int fixedInputSize = WhisperUtil.WHISPER_SAMPLE_RATE * WhisperUtil.WHISPER_CHUNK_SIZE;
         float[] inputSamples = new float[fixedInputSize];
         int copyLength = Math.min(samples.length, fixedInputSize);
@@ -156,6 +155,10 @@ public class WhisperEngineJava implements WhisperEngine {
     }
 
     private String runInference(float[] inputData) {
+        if (mInterpreter == null) {
+            throw new IllegalStateException("Interpreter is not initialized");
+        }
+
         // Create input tensor
         Tensor inputTensor = mInterpreter.getInputTensor(0);
         TensorBuffer inputBuffer = TensorBuffer.createFixedSize(inputTensor.shape(), inputTensor.dataType());
@@ -163,7 +166,7 @@ public class WhisperEngineJava implements WhisperEngine {
 
         // Create output tensor
         Tensor outputTensor = mInterpreter.getOutputTensor(0);
-        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputTensor.shape(), DataType.FLOAT32);
+        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputTensor.shape(), outputTensor.dataType());
 //        printTensorDump("Output Tensor Dump ===>", outputTensor);
 
         // Load input data
@@ -173,6 +176,7 @@ public class WhisperEngineJava implements WhisperEngine {
         for (float input : inputData) {
             inputBuf.putFloat(input);
         }
+        inputBuf.rewind();
 
         // To test mel data as a input directly
 //        try {
@@ -190,11 +194,15 @@ public class WhisperEngineJava implements WhisperEngine {
 //        Log.d(TAG, "After inference...");
 
         // Retrieve the results
-        int outputLen = outputBuffer.getIntArray().length;
+        if (outputTensor.dataType() != DataType.INT32) {
+            throw new IllegalStateException("Unexpected Whisper output type: " + outputTensor.dataType());
+        }
+        int[] outputTokens = outputBuffer.getIntArray();
+        int outputLen = outputTokens.length;
         Log.d(TAG, "output_len: " + outputLen);
         StringBuilder result = new StringBuilder();
         for (int i = 0; i < outputLen; i++) {
-            int token = outputBuffer.getBuffer().getInt();
+            int token = outputTokens[i];
             if (token == mWhisperUtil.getTokenEOT())
                 break;
 

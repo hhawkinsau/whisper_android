@@ -19,9 +19,9 @@ android {
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        // Specify the ABIs to include
+        // 2026 target set: modern 64-bit Android devices plus emulator/desktop-class x86_64.
         ndk {
-            abiFilters 'armeabi-v7a', 'arm64-v8a'
+            abiFilters 'arm64-v8a', 'x86_64'
         }
     }
 
@@ -32,25 +32,18 @@ android {
             signingConfig signingConfigs.debug
         }
     }
-    externalNativeBuild {
-        cmake {
-            path "src/main/cpp/CMakeLists.txt"
-        }
-    }
     compileOptions {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    ndkVersion '26.1.10909125'
 }
 
 dependencies {
     implementation libs.androidx.appcompat
     implementation libs.material
     implementation libs.androidx.constraintlayout
-    implementation libs.ffmpeg.kit.full
 
-    // Standalone LiteRT runtime packaged inside the app (no Play services dependency)
+    // Standalone LiteRT runtime packaged inside the app.
     implementation libs.litert
     implementation(libs.litert.support) {
         exclude group: 'com.google.ai.edge.litert', module: 'litert-api'

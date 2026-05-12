@@ -16,12 +16,14 @@ import android.os.Handler;
 import android.os.Looper;
 import android.provider.DocumentsContract;
 import android.provider.OpenableColumns;
+import android.text.TextUtils;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
 
@@ -33,7 +35,15 @@ import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 import androidx.core.content.IntentCompat;
 
+import com.google.android.gms.tasks.Tasks;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
+import com.google.mlkit.common.model.DownloadConditions;
+import com.google.mlkit.nl.languageid.LanguageIdentification;
+import com.google.mlkit.nl.languageid.LanguageIdentifier;
+import com.google.mlkit.nl.translate.TranslateLanguage;
+import com.google.mlkit.nl.translate.Translation;
+import com.google.mlkit.nl.translate.Translator;
+import com.google.mlkit.nl.translate.TranslatorOptions;
 import com.whispertflite.asr.Player;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
@@ -92,6 +102,7 @@ public class MainActivity extends AppCompatActivity {
 
     private TextView tvStatus;
     private TextView tvResult;
+    private TextView tvLog;
     private FloatingActionButton fabCopy;
     private Button btnRecord;
     private Button btnPlay;
@@ -101,6 +112,7 @@ public class MainActivity extends AppCompatActivity {
     private Spinner spinnerTflite;
     private Spinner spinnerWave;
     private Spinner spinnerOutputLanguage;
+    private ScrollView scrollLog;
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -124,6 +136,7 @@ public class MainActivity extends AppCompatActivity {
     ));
     private boolean isModelDownloadInProgress = false;
     private SubtitleOutputOption selectedSubtitleOutputOption = subtitleOutputOptions.get(0);
+    private String latestTranscriptText = "";
 
     private long startTime = 0;
     private final boolean loopTesting = false;
@@ -147,6 +160,7 @@ public class MainActivity extends AppCompatActivity {
 
         tvStatus = findViewById(R.id.tvStatus);
         tvResult = findViewById(R.id.tvResult);
+        tvLog = findViewById(R.id.tvLog);
         btnRecord = findViewById(R.id.btnRecord);
         btnPlay = findViewById(R.id.btnPlay);
         btnTranscribe = findViewById(R.id.btnTranscb);
@@ -156,6 +170,7 @@ public class MainActivity extends AppCompatActivity {
         spinnerTflite = findViewById(R.id.spnrTfliteFiles);
         spinnerWave = findViewById(R.id.spnrWaveFiles);
         spinnerOutputLanguage = findViewById(R.id.spnrOutputLanguage);
+        scrollLog = findViewById(R.id.scrollLog);
 
         videoPickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
@@ -274,6 +289,8 @@ public class MainActivity extends AppCompatActivity {
         btnTranscribe.setOnClickListener(v -> {
             if (selectedWaveFile == null) return;
             if (!ensureModelReady()) return;
+            clearProgressLog();
+            appendProgressLog("Starting manual transcript for " + selectedWaveFile.getName());
             if (mRecorder != null && mRecorder.isInProgress()) {
                 Log.d(TAG, "Recording is in progress... stopping...");
                 stopRecording();
@@ -286,6 +303,7 @@ public class MainActivity extends AppCompatActivity {
             if (!mWhisper.isInProgress()) {
                 Log.d(TAG, "Start transcription...");
                 pendingVideoSubtitleJob = null;
+                latestTranscriptText = "";
                 startTranscription(selectedWaveFile.getAbsolutePath());
 
                 // only for loop testing
@@ -361,6 +379,7 @@ public class MainActivity extends AppCompatActivity {
 
         handleIncomingVideoIntent(getIntent());
         updateModelAvailabilityUi();
+        appendProgressLog("App ready");
 
         // for debugging
 //        testParallelProcessing();
@@ -403,12 +422,15 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
+        appendProgressLog("Loading Whisper model " + modelFile.getName());
         mWhisper = new Whisper(this);
         mWhisper.loadModel(modelFile, vocabFile, isMultilingualModel);
+        appendProgressLog("Model initialized");
         mWhisper.setListener(new Whisper.WhisperListener() {
             @Override
             public void onUpdateReceived(String message) {
                 Log.d(TAG, "Update is received, Message: " + message);
+                appendProgressLog(message);
 
                 if (message.equals(Whisper.MSG_PROCESSING)) {
                     handler.post(() -> tvStatus.setText(message));
@@ -423,6 +445,8 @@ public class MainActivity extends AppCompatActivity {
                     VideoSubtitleJob job = pendingVideoSubtitleJob;
                     if (job != null) {
                         finishVideoSubtitleJob(job);
+                    } else {
+                        finishManualTranscriptJob();
                     }
                     // for testing
                     if (loopTesting)
@@ -440,6 +464,9 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> tvStatus.setText(getString(R.string.processing_done_in, timeTaken)));
 
                 Log.d(TAG, "Result: " + result);
+                latestTranscriptText = (latestTranscriptText == null ? "" : latestTranscriptText)
+                        + (result == null ? "" : result);
+                appendProgressLog("Whisper output received");
                 VideoSubtitleJob job = pendingVideoSubtitleJob;
                 if (job != null) {
                     job.transcript.append(result);
@@ -545,8 +572,12 @@ public class MainActivity extends AppCompatActivity {
     private void openVideoForSubtitle(Uri videoUri) {
         if (!isSupportedVideoUri(videoUri)) {
             tvStatus.setText(getString(R.string.unsupported_video_type, getDisplayName(videoUri)));
+            appendProgressLog("Rejected unsupported video: " + getDisplayName(videoUri));
             return;
         }
+        clearProgressLog();
+        appendProgressLog("Selected video " + getDisplayName(videoUri));
+        appendProgressLog("Requested output language " + selectedSubtitleOutputOption.languageCode);
         startVideoSubtitlePipeline(videoUri);
     }
 
@@ -587,11 +618,13 @@ public class MainActivity extends AppCompatActivity {
         btnPickVideo.setEnabled(false);
         tvResult.setText("");
         tvStatus.setText(R.string.preparing_selected_video);
+        appendProgressLog("Preparing selected video");
 
         new Thread(() -> {
             try {
                 File wavFile = new File(sdcardDataFolder, EXTRACTED_VIDEO_WAV);
                 extractAudioToWav(videoUri, wavFile);
+                appendProgressLog("Audio extracted to " + wavFile.getName());
 
                 VideoSubtitleJob job = new VideoSubtitleJob();
                 job.videoUri = videoUri;
@@ -602,6 +635,7 @@ public class MainActivity extends AppCompatActivity {
                 pendingVideoSubtitleJob = job;
 
                 handler.post(() -> tvStatus.setText(R.string.audio_extracted_starting_whisper));
+                appendProgressLog("Starting Whisper transcription");
                 if (mWhisper == null && !initModel(selectedTfliteFile)) {
                     resetVideoSubtitleJob();
                     return;
@@ -634,24 +668,37 @@ public class MainActivity extends AppCompatActivity {
 
     private void extractAudioToWav(Uri videoUri, File wavFile) throws IOException {
         handler.post(() -> tvStatus.setText("Extracting 16 kHz mono WAV with Android media APIs..."));
+        appendProgressLog("Extracting audio with Android media APIs");
         AudioExtractionUtil.extractToWaveFile(this, videoUri, wavFile);
     }
 
     private void finishVideoSubtitleJob(VideoSubtitleJob job) {
         new Thread(() -> {
             String subtitleFileName = getSrtFileName(job.videoDisplayName, job.subtitleLanguageCode);
-            String srtText = buildSrt(job.transcript.toString(), job.durationMs);
+            String finalTranscript = translateTranscriptIfNeeded(job.transcript.toString(), job.subtitleLanguageCode);
+            handler.post(() -> tvResult.setText(finalTranscript));
+            String srtText = buildSrt(finalTranscript, job.durationMs);
             try {
+                appendProgressLog("Saving subtitle beside source as " + subtitleFileName);
                 Uri srtUri = createSiblingSubtitleUri(job.videoUri, subtitleFileName);
                 writeTextToUri(srtUri, srtText);
                 handler.post(() -> tvStatus.setText(getString(R.string.srt_saved_beside_video, subtitleFileName)));
+                appendProgressLog("Saved subtitle beside source video");
                 resetVideoSubtitleJob();
             } catch (Exception e) {
                 Log.w(TAG, "Direct sibling SRT save failed; requesting folder permission", e);
                 pendingSubtitleText = srtText;
                 pendingSubtitleFileName = subtitleFileName;
+                appendProgressLog("Direct save failed, requesting folder permission");
                 handler.post(() -> requestSubtitleFolderPermission(subtitleFileName));
             }
+        }).start();
+    }
+
+    private void finishManualTranscriptJob() {
+        new Thread(() -> {
+            String translatedText = translateTranscriptIfNeeded(latestTranscriptText, selectedSubtitleOutputOption.languageCode);
+            handler.post(() -> tvResult.setText(translatedText));
         }).start();
     }
 
@@ -701,9 +748,11 @@ public class MainActivity extends AppCompatActivity {
                 }
                 writeTextToUri(subtitleUri, subtitleText);
                 handler.post(() -> tvStatus.setText(getString(R.string.srt_saved_to_folder, subtitleFileName)));
+                appendProgressLog("Saved subtitle to selected folder");
             } catch (Exception e) {
                 Log.e(TAG, "Failed to write subtitle to selected folder", e);
                 handler.post(() -> tvStatus.setText(getString(R.string.srt_save_failed, e.getMessage())));
+                appendProgressLog("Subtitle save failed: " + e.getMessage());
             } finally {
                 clearPendingSubtitleWrite();
                 resetVideoSubtitleJob();
@@ -782,6 +831,77 @@ public class MainActivity extends AppCompatActivity {
 
     private String quotePath(String path) {
         return "'" + path.replace("'", "'\\''") + "'";
+    }
+
+    private String translateTranscriptIfNeeded(String transcript, String targetLanguageCode) {
+        if (TextUtils.isEmpty(transcript) || TextUtils.isEmpty(targetLanguageCode)) {
+            return transcript;
+        }
+
+        try {
+            appendProgressLog("Identifying transcript language");
+            LanguageIdentifier languageIdentifier = LanguageIdentification.getClient();
+            String sourceLanguageCode;
+            try {
+                sourceLanguageCode = Tasks.await(languageIdentifier.identifyLanguage(transcript));
+            } finally {
+                languageIdentifier.close();
+            }
+
+            if (TextUtils.isEmpty(sourceLanguageCode) || "und".equals(sourceLanguageCode)) {
+                appendProgressLog("Language identification was inconclusive; keeping transcript");
+                return transcript;
+            }
+
+            appendProgressLog("Detected transcript language " + sourceLanguageCode);
+            if (targetLanguageCode.equalsIgnoreCase(sourceLanguageCode)) {
+                appendProgressLog("Target language already matches transcript");
+                return transcript;
+            }
+
+            String sourceTranslateLanguage = TranslateLanguage.fromLanguageTag(sourceLanguageCode);
+            String targetTranslateLanguage = TranslateLanguage.fromLanguageTag(targetLanguageCode);
+            if (sourceTranslateLanguage == null || targetTranslateLanguage == null) {
+                appendProgressLog("Translation language mapping unavailable; keeping transcript");
+                return transcript;
+            }
+
+            handler.post(() -> tvStatus.setText(getString(R.string.translating_subtitles, targetLanguageCode)));
+            appendProgressLog("Downloading translation model for " + targetLanguageCode);
+            TranslatorOptions options = new TranslatorOptions.Builder()
+                    .setSourceLanguage(sourceTranslateLanguage)
+                    .setTargetLanguage(targetTranslateLanguage)
+                    .build();
+            Translator translator = Translation.getClient(options);
+            try {
+                Tasks.await(translator.downloadModelIfNeeded(new DownloadConditions.Builder().build()));
+                appendProgressLog("Translation model ready; translating transcript");
+                String translatedText = Tasks.await(translator.translate(transcript));
+                appendProgressLog("Translation complete");
+                return translatedText;
+            } finally {
+                translator.close();
+            }
+        } catch (Exception e) {
+            Log.e(TAG, "Failed to translate transcript", e);
+            handler.post(() -> tvStatus.setText(getString(R.string.translation_failed, e.getMessage())));
+            appendProgressLog("Translation failed; using transcript");
+            return transcript;
+        }
+    }
+
+    private void clearProgressLog() {
+        handler.post(() -> tvLog.setText(""));
+    }
+
+    private void appendProgressLog(String message) {
+        handler.post(() -> {
+            String timestamp = String.format(Locale.US, "%1$tH:%1$tM:%1$tS", System.currentTimeMillis());
+            String existing = tvLog.getText().toString();
+            String nextLine = "[" + timestamp + "] " + message;
+            tvLog.setText(existing.isEmpty() ? nextLine : existing + "\n" + nextLine);
+            scrollLog.post(() -> scrollLog.fullScroll(View.FOCUS_DOWN));
+        });
     }
 
     private boolean isSupportedVideoUri(Uri videoUri) {
@@ -887,6 +1007,8 @@ public class MainActivity extends AppCompatActivity {
 
         isModelDownloadInProgress = true;
         deinitModel();
+        clearProgressLog();
+        appendProgressLog("Preparing model download");
         updateModelAvailabilityUi();
 
         new Thread(() -> {
@@ -895,14 +1017,17 @@ public class MainActivity extends AppCompatActivity {
             String failureMessage = null;
             try {
                 if (!modelFile.exists()) {
+                    appendProgressLog("Downloading model " + modelFile.getName());
                     handler.post(() -> tvStatus.setText(getString(R.string.downloading_model_file, modelFile.getName())));
                     downloadFile(LARGE_V3_TURBO_MODEL_URL, modelFile);
                 }
                 if (!vocabFile.exists()) {
+                    appendProgressLog("Downloading vocab " + vocabFile.getName());
                     handler.post(() -> tvStatus.setText(getString(R.string.downloading_model_file, vocabFile.getName())));
                     downloadFile(LARGE_V3_MULTILINGUAL_VOCAB_URL, vocabFile);
                 }
                 handler.post(() -> {
+                    appendProgressLog("Model artifacts ready");
                     refreshModelFiles();
                     updateModelAvailabilityUi();
                 });

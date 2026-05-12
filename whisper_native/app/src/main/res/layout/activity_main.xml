@@ -176,6 +176,31 @@
             android:textSize="17sp" />
     </ScrollView>
 
+    <TextView
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginTop="12dp"
+        android:layout_marginBottom="6dp"
+        android:text="@string/progress_log"
+        android:textColor="@color/colorPrimary"
+        android:textSize="15sp" />
+
+    <ScrollView
+        android:id="@+id/scrollLog"
+        android:layout_width="match_parent"
+        android:layout_height="120dp"
+        android:background="@android:color/black"
+        android:padding="8dp">
+
+        <TextView
+            android:id="@+id/tvLog"
+            android:layout_width="match_parent"
+            android:layout_height="wrap_content"
+            android:fontFamily="monospace"
+            android:textColor="@android:color/white"
+            android:textSize="12sp" />
+    </ScrollView>
+
     <!-- Add Floating Action Button -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabCopy"

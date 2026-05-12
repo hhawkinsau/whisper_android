@@ -55,6 +55,8 @@ dependencies {
     implementation libs.androidx.appcompat
     implementation libs.material
     implementation libs.androidx.constraintlayout
+    implementation 'com.google.mlkit:language-id:17.0.6'
+    implementation 'com.google.mlkit:translate:17.0.3'
 
     // Standalone LiteRT runtime packaged inside the app.
     implementation libs.litert

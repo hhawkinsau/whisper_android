@@ -38,6 +38,19 @@ android {
     }
 }
 
+// Compatibility aliases for callers that still invoke the old native-build tasks.
+tasks.register("externalNativeBuildDebug") {
+    group = "build"
+    description = "Compatibility alias for legacy native-build callers; builds the debug app on the Java LiteRT path."
+    dependsOn("assembleDebug")
+}
+
+tasks.register("externalNativeBuildRelease") {
+    group = "build"
+    description = "Compatibility alias for legacy native-build callers; builds the release app on the Java LiteRT path."
+    dependsOn("assembleRelease")
+}
+
 dependencies {
     implementation libs.androidx.appcompat
     implementation libs.material

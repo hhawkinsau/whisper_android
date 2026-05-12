@@ -48,6 +48,7 @@ public class Whisper {
 
     public Whisper(Context context) {
         this.mWhisperEngine = new WhisperEngineJava(context);
+        this.mWhisperEngine.setProgressListener(this::sendUpdate);
 
         // Start thread for file transcription for file transcription
         Thread threadTranscbFile = new Thread(this::transcribeFileLoop);
@@ -62,16 +63,20 @@ public class Whisper {
         this.mUpdateListener = listener;
     }
 
-    public void loadModel(File modelPath, File vocabPath, boolean isMultilingual) {
-        loadModel(modelPath.getAbsolutePath(), vocabPath.getAbsolutePath(), isMultilingual);
+    public boolean loadModel(File modelPath, File vocabPath, boolean isMultilingual) {
+        return loadModel(modelPath.getAbsolutePath(), vocabPath.getAbsolutePath(), isMultilingual);
     }
 
-    public void loadModel(String modelPath, String vocabPath, boolean isMultilingual) {
+    public boolean loadModel(String modelPath, String vocabPath, boolean isMultilingual) {
+        sendUpdate("Initializing Whisper model");
         try {
-            mWhisperEngine.initialize(modelPath, vocabPath, isMultilingual);
+            boolean initialized = mWhisperEngine.initialize(modelPath, vocabPath, isMultilingual);
+            sendUpdate(initialized ? "Model initialization complete" : "Model initialization failed");
+            return initialized;
         } catch (IOException e) {
             Log.e(TAG, "Error initializing model...", e);
-            sendUpdate("Model initialization failed");
+            sendUpdate("Model initialization failed: " + e.getMessage());
+            return false;
         }
     }
 

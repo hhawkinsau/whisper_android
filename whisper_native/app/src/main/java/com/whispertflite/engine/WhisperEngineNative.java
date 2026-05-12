@@ -44,6 +44,11 @@ public class WhisperEngineNative implements WhisperEngine {
         return transcribeFile(nativePtr, waveFile);
     }
 
+    @Override
+    public void setProgressListener(ProgressListener progressListener) {
+        // No-op while the native engine path is disabled.
+    }
+
     private int loadModel(String modelPath, boolean isMultilingual) {
         return loadModel(nativePtr, modelPath, isMultilingual);
     }

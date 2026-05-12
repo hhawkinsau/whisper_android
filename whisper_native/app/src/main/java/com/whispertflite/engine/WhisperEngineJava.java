@@ -22,14 +22,23 @@ import java.io.IOException;
 import java.nio.ByteBuffer;
 import java.nio.ByteOrder;
 import java.nio.channels.FileChannel;
+import java.util.Locale;
 
 public class WhisperEngineJava implements WhisperEngine {
+    private static final int LARGE_MODEL_INTERPRETER_THREADS = 2;
+    private static final int LARGE_MODEL_MEL_THREADS = 1;
+    private static final int DEFAULT_MAX_INTERPRETER_THREADS = 4;
+    private static final int DEFAULT_MAX_MEL_THREADS = 2;
+    private static final long LARGE_MODEL_BYTES_THRESHOLD = 256L * 1024L * 1024L;
     private final String TAG = "WhisperEngineJava";
     private final WhisperUtil mWhisperUtil = new WhisperUtil();
 
     private final Context mContext;
     private boolean mIsInitialized = false;
     private Interpreter mInterpreter = null;
+    private ProgressListener mProgressListener = null;
+    private int mInterpreterThreads = 1;
+    private int mMelThreads = 1;
 //    private GpuDelegate gpuDelegate;
 
     public WhisperEngineJava(Context context) {
@@ -43,10 +52,12 @@ public class WhisperEngineJava implements WhisperEngine {
 
     @Override
     public boolean initialize(String modelPath, String vocabPath, boolean multilingual) throws IOException {
+        notifyProgress("Loading model from storage");
         // Load model
         loadModel(modelPath);
         Log.d(TAG, "Model is loaded..." + modelPath);
 
+        notifyProgress("Loading filters and vocabulary");
         // Load filters and vocab
         boolean ret = mWhisperUtil.loadFiltersAndVocab(multilingual, vocabPath);
         if (ret) {
@@ -72,11 +83,13 @@ public class WhisperEngineJava implements WhisperEngine {
     @Override
     public String transcribeFile(String wavePath) {
         // Calculate Mel spectrogram
+        notifyProgress("Preparing mel spectrogram");
         Log.d(TAG, "Calculating Mel spectrogram...");
         float[] melSpectrogram = getMelSpectrogram(WaveUtil.getSamples(wavePath));
         Log.d(TAG, "Mel spectrogram is calculated...!");
 
         // Perform inference
+        notifyProgress("Running Whisper decoder");
         String result = runInference(melSpectrogram);
         Log.d(TAG, "Inference is executed...!");
 
@@ -88,19 +101,45 @@ public class WhisperEngineJava implements WhisperEngine {
         return runInference(getMelSpectrogram(samples));
     }
 
+    @Override
+    public void setProgressListener(ProgressListener progressListener) {
+        mProgressListener = progressListener;
+    }
+
     // Load TFLite model
     private void loadModel(String modelPath) throws IOException {
         ByteBuffer tfliteModel;
+        long declaredLength;
         try (FileInputStream fileInputStream = new FileInputStream(modelPath);
              FileChannel fileChannel = fileInputStream.getChannel()) {
             long startOffset = 0;
-            long declaredLength = fileChannel.size();
+            declaredLength = fileChannel.size();
             tfliteModel = fileChannel.map(FileChannel.MapMode.READ_ONLY, startOffset, declaredLength);
         }
 
         // Set the number of threads for inference
         Interpreter.Options options = new Interpreter.Options();
-        options.setNumThreads(Runtime.getRuntime().availableProcessors());
+        boolean useConservativeLargeModelProfile = shouldUseConservativeLargeModelProfile(modelPath, declaredLength);
+        int availableProcessors = Runtime.getRuntime().availableProcessors();
+        mInterpreterThreads = chooseInterpreterThreads(availableProcessors, useConservativeLargeModelProfile);
+        mMelThreads = chooseMelThreads(availableProcessors, useConservativeLargeModelProfile);
+        options.setNumThreads(mInterpreterThreads);
+        notifyProgress(String.format(
+                Locale.US,
+                "Using LiteRT profile: %d inference thread%s, %d mel thread%s",
+                mInterpreterThreads,
+                mInterpreterThreads == 1 ? "" : "s",
+                mMelThreads,
+                mMelThreads == 1 ? "" : "s"));
+        Log.d(TAG, String.format(
+                Locale.US,
+                "Model profile for %s: size=%d bytes, availableProcessors=%d, interpreterThreads=%d, melThreads=%d, conservative=%s",
+                modelPath,
+                declaredLength,
+                availableProcessors,
+                mInterpreterThreads,
+                mMelThreads,
+                useConservativeLargeModelProfile));
 //        options.setUseXNNPACK(true);
 
 //        boolean isNNAPI = true;
@@ -150,8 +189,7 @@ public class WhisperEngineJava implements WhisperEngine {
         int copyLength = Math.min(samples.length, fixedInputSize);
         System.arraycopy(samples, 0, inputSamples, 0, copyLength);
 
-        int cores = Runtime.getRuntime().availableProcessors();
-        return mWhisperUtil.getMelSpectrogram(inputSamples, inputSamples.length, cores);
+        return mWhisperUtil.getMelSpectrogram(inputSamples, inputSamples.length, mMelThreads);
     }
 
     private String runInference(float[] inputData) {
@@ -241,5 +279,30 @@ public class WhisperEngineJava implements WhisperEngine {
         Log.d(TAG, "  quantizationParams.getScale: " + tensor.quantizationParams().getScale());
         Log.d(TAG, "  quantizationParams.getZeroPoint: " + tensor.quantizationParams().getZeroPoint());
         Log.d(TAG, "==================================================================");
+    }
+
+    private void notifyProgress(String message) {
+        if (mProgressListener != null) {
+            mProgressListener.onProgress(message);
+        }
+    }
+
+    private boolean shouldUseConservativeLargeModelProfile(String modelPath, long declaredLength) {
+        return declaredLength >= LARGE_MODEL_BYTES_THRESHOLD
+                || modelPath.toLowerCase(Locale.US).contains("large-v3");
+    }
+
+    private int chooseInterpreterThreads(int availableProcessors, boolean conservativeLargeModelProfile) {
+        if (conservativeLargeModelProfile) {
+            return Math.min(LARGE_MODEL_INTERPRETER_THREADS, Math.max(1, availableProcessors));
+        }
+        return Math.min(DEFAULT_MAX_INTERPRETER_THREADS, Math.max(1, availableProcessors / 2));
+    }
+
+    private int chooseMelThreads(int availableProcessors, boolean conservativeLargeModelProfile) {
+        if (conservativeLargeModelProfile) {
+            return Math.min(LARGE_MODEL_MEL_THREADS, Math.max(1, availableProcessors));
+        }
+        return Math.min(DEFAULT_MAX_MEL_THREADS, Math.max(1, availableProcessors / 2));
     }
 }

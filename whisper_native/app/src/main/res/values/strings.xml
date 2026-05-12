@@ -29,4 +29,5 @@
     <string name="progress_log">Progress log</string>
     <string name="translation_failed">Translation failed, using transcription: %1$s</string>
     <string name="translating_subtitles">Translating transcript to %1$s...</string>
+    <string name="whisper_model_initialization_failed">Whisper model initialization failed</string>
 </resources>

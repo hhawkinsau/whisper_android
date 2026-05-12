@@ -422,10 +422,7 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
 
-        appendProgressLog("Loading Whisper model " + modelFile.getName());
         mWhisper = new Whisper(this);
-        mWhisper.loadModel(modelFile, vocabFile, isMultilingualModel);
-        appendProgressLog("Model initialized");
         mWhisper.setListener(new Whisper.WhisperListener() {
             @Override
             public void onUpdateReceived(String message) {
@@ -474,6 +471,13 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> tvResult.append(result));
             }
         });
+        appendProgressLog("Loading Whisper model " + modelFile.getName());
+        boolean initialized = mWhisper.loadModel(modelFile, vocabFile, isMultilingualModel);
+        if (!initialized) {
+            handler.post(() -> tvStatus.setText(R.string.whisper_model_initialization_failed));
+            deinitModel();
+            return false;
+        }
         return true;
     }
 

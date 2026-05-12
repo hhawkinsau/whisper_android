@@ -1,0 +1,25 @@
+[versions]
+agp = "9.2.1"
+appcompat = "1.7.1"
+constraintlayout = "2.2.1"
+ffmpegKitFull = "6.1.4"
+gradle = "9.2.1"
+kotlin = "2.3.21"
+kotlinGradlePlugin = "2.3.21"
+litert = "2.1.4"
+litertSupport = "1.4.2"
+material = "1.13.0"
+
+[libraries]
+androidx-appcompat = { group = "androidx.appcompat", name = "appcompat", version.ref = "appcompat" }
+androidx-constraintlayout = { group = "androidx.constraintlayout", name = "constraintlayout", version.ref = "constraintlayout" }
+ffmpeg-kit-full = { group = "com.mrljdx", name = "ffmpeg-kit-full", version.ref = "ffmpegKitFull" }
+gradle = { group = "com.android.tools.build", name = "gradle", version.ref = "gradle" }
+kotlin-gradle-plugin = { group = "org.jetbrains.kotlin", name = "kotlin-gradle-plugin", version.ref = "kotlinGradlePlugin" }
+litert = { group = "com.google.ai.edge.litert", name = "litert", version.ref = "litert" }
+litert-support = { group = "com.google.ai.edge.litert", name = "litert-support", version.ref = "litertSupport" }
+material = { group = "com.google.android.material", name = "material", version.ref = "material" }
+
+[plugins]
+android-application = { id = "com.android.application", version.ref = "agp" }
+jetbrains-kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }

@@ -1,6 +1,5 @@
 plugins {
-    id 'com.android.application'
-    id 'org.jetbrains.kotlin.android'
+    alias libs.plugins.android.application
 }
 
 android {
@@ -9,18 +8,18 @@ android {
         }
     }
     namespace 'com.whispertflite'
-    compileSdk 34
+    compileSdk 37
 
     defaultConfig {
         applicationId "com.whispertflite"
         minSdk 26
-        targetSdk 34
+        targetSdk 37
         versionCode 1
         versionName "1.0"
 
         testInstrumentationRunner "androidx.test.runner.AndroidJUnitRunner"
 
-        // Specify the ABIs to exclude
+        // Specify the ABIs to include
         ndk {
             abiFilters 'armeabi-v7a', 'arm64-v8a'
         }
@@ -42,21 +41,20 @@ android {
         sourceCompatibility = JavaVersion.VERSION_11
         targetCompatibility = JavaVersion.VERSION_11
     }
-    kotlinOptions {
-        jvmTarget = '11'
-    }
     ndkVersion '26.1.10909125'
 }
 
 dependencies {
-    implementation 'androidx.appcompat:appcompat:1.7.0'
-    implementation 'com.google.android.material:material:1.12.0'
-    implementation 'androidx.constraintlayout:constraintlayout:2.2.0'
-    implementation 'com.mrljdx:ffmpeg-kit-full:6.1.4'
+    implementation libs.androidx.appcompat
+    implementation libs.material
+    implementation libs.androidx.constraintlayout
+    implementation libs.ffmpeg.kit.full
 
     // Standalone LiteRT runtime packaged inside the app (no Play services dependency)
-    implementation 'com.google.ai.edge.litert:litert:1.4.1'
-    implementation 'com.google.ai.edge.litert:litert-support:1.4.1'
+    implementation libs.litert
+    implementation(libs.litert.support) {
+        exclude group: 'com.google.ai.edge.litert', module: 'litert-api'
+    }
 
     // Optional standalone LiteRT GPU artifacts for the v1 Interpreter line.
 //    implementation 'com.google.ai.edge.litert:litert-gpu:1.4.1'

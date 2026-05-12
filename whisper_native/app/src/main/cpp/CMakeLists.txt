@@ -2,6 +2,9 @@
 cmake_minimum_required(VERSION 3.0)
 project(TFLiteEngine VERSION 1.0)
 
+# Find LiteRT (formerly TFLite) via Prefab
+find_package(litert REQUIRED CONFIG)
+
 # Specify where to find the header files for TF Lite C++
 set(INCLUDE_DIRS
         ${CMAKE_CURRENT_LIST_DIR}/tf-lite-api/tensorflow_src
@@ -13,12 +16,7 @@ if (ANDROID)
     add_library(audioEngine SHARED TFLiteEngine.cpp TFLiteEngineJNI.cpp)
     target_include_directories(audioEngine PRIVATE ${INCLUDE_DIRS})
 
-    # Add 'tflite' library (imported)
-    add_library(tflite SHARED IMPORTED)
-    set_target_properties(tflite PROPERTIES IMPORTED_LOCATION
-            ${CMAKE_CURRENT_LIST_DIR}/tf-lite-api/generated-libs/${ANDROID_ABI}/libtensorflowlite.so)
-
-    target_link_libraries(audioEngine tflite)
+    target_link_libraries(audioEngine litert::litert log)
 endif ()
 
 # Check if the build is not Android

@@ -2,8 +2,6 @@
 
 buildscript {
     dependencies {
-        classpath('com.android.tools.build:gradle:9.2.1')
-        classpath('org.jetbrains.kotlin:kotlin-gradle-plugin:2.2.10')
     }
 
     repositories {
@@ -12,7 +10,6 @@ buildscript {
     }
 }
 
-//plugins {
-//    id 'com.android.application' version '8.0.2' apply false
-//    id 'com.android.library' version '8.0.2' apply false
-//}
+plugins {
+    alias libs.plugins.android.application apply false
+}

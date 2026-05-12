@@ -24,4 +24,6 @@
     <string name="model_download_failed">Model download failed: %1$s</string>
     <string name="model_download_in_progress">Model download in progress...</string>
     <string name="model_ready">Model ready: %1$s</string>
+    <string name="output_language">Output language:</string>
+    <string name="unsupported_video_type">Unsupported video type: %1$s</string>
 </resources>

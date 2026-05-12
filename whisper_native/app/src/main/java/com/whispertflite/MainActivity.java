@@ -48,6 +48,7 @@ import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
 import java.util.ArrayList;
+import java.util.Arrays;
 import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
@@ -72,6 +73,22 @@ public class MainActivity extends AppCompatActivity {
     private static final String MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual.bin";
     private static final String[] EXTENSIONS_TO_COPY = {"bin", "wav", "pcm"};
     private static final String EXTRACTED_VIDEO_WAV = "selected_video_audio.wav";
+    private static final String[] SUPPORTED_VIDEO_MIME_TYPES = {
+            "video/*",
+            "video/mp4",
+            "video/webm",
+            "video/3gpp",
+            "video/mpeg",
+            "video/x-msvideo",
+            "video/quicktime",
+            "video/x-matroska",
+            "video/mp2t",
+            "video/x-flv",
+            "application/ogg"
+    };
+    private static final String[] SUPPORTED_VIDEO_EXTENSIONS = {
+            ".mp4", ".webm", ".3gp", ".mpg", ".mpeg", ".avi", ".mov", ".mkv", ".ogv", ".ts", ".flv"
+    };
 
     private TextView tvStatus;
     private TextView tvResult;
@@ -83,6 +100,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnDownloadModel;
     private Spinner spinnerTflite;
     private Spinner spinnerWave;
+    private Spinner spinnerOutputLanguage;
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -93,7 +111,19 @@ public class MainActivity extends AppCompatActivity {
     private File selectedTfliteFile = null;
     private final ArrayList<File> tfliteFiles = new ArrayList<>();
     private final ArrayList<File> waveFiles = new ArrayList<>();
+    private final ArrayList<SubtitleOutputOption> subtitleOutputOptions = new ArrayList<>(Arrays.asList(
+            new SubtitleOutputOption("English", "en"),
+            new SubtitleOutputOption("Arabic", "ar"),
+            new SubtitleOutputOption("Spanish", "es"),
+            new SubtitleOutputOption("French", "fr"),
+            new SubtitleOutputOption("Hindi", "hi"),
+            new SubtitleOutputOption("Portuguese", "pt"),
+            new SubtitleOutputOption("Russian", "ru"),
+            new SubtitleOutputOption("Ukrainian", "uk"),
+            new SubtitleOutputOption("Mandarin Chinese", "zh-CN")
+    ));
     private boolean isModelDownloadInProgress = false;
+    private SubtitleOutputOption selectedSubtitleOutputOption = subtitleOutputOptions.get(0);
 
     private long startTime = 0;
     private final boolean loopTesting = false;
@@ -125,6 +155,7 @@ public class MainActivity extends AppCompatActivity {
         fabCopy = findViewById(R.id.fabCopy);
         spinnerTflite = findViewById(R.id.spnrTfliteFiles);
         spinnerWave = findViewById(R.id.spnrWaveFiles);
+        spinnerOutputLanguage = findViewById(R.id.spnrOutputLanguage);
 
         videoPickerLauncher = registerForActivityResult(
                 new ActivityResultContracts.StartActivityForResult(),
@@ -133,7 +164,7 @@ public class MainActivity extends AppCompatActivity {
                         Uri videoUri = result.getData().getData();
                         if (videoUri != null) {
                             persistVideoUriPermission(result.getData(), videoUri);
-                            startVideoSubtitlePipeline(videoUri);
+                            openVideoForSubtitle(videoUri);
                         }
                     }
                 });
@@ -155,6 +186,21 @@ public class MainActivity extends AppCompatActivity {
 
         refreshModelFiles();
         refreshWaveFiles();
+        spinnerOutputLanguage.setAdapter(getSubtitleOutputAdapter());
+        spinnerOutputLanguage.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
+            @Override
+            public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                SubtitleOutputOption option = (SubtitleOutputOption) parent.getItemAtPosition(position);
+                if (option != null) {
+                    selectedSubtitleOutputOption = option;
+                }
+            }
+
+            @Override
+            public void onNothingSelected(AdapterView<?> parent) {
+                selectedSubtitleOutputOption = subtitleOutputOptions.get(0);
+            }
+        });
 
         spinnerTflite.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
@@ -340,7 +386,7 @@ public class MainActivity extends AppCompatActivity {
         }
         if (videoUri != null) {
             persistVideoUriPermission(intent, videoUri);
-            startVideoSubtitlePipeline(videoUri);
+            openVideoForSubtitle(videoUri);
         }
     }
 
@@ -490,9 +536,18 @@ public class MainActivity extends AppCompatActivity {
     private void openVideoPicker() {
         Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
         intent.addCategory(Intent.CATEGORY_OPENABLE);
-        intent.setType("video/*");
+        intent.setType("*/*");
+        intent.putExtra(Intent.EXTRA_MIME_TYPES, SUPPORTED_VIDEO_MIME_TYPES);
         intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
         videoPickerLauncher.launch(intent);
+    }
+
+    private void openVideoForSubtitle(Uri videoUri) {
+        if (!isSupportedVideoUri(videoUri)) {
+            tvStatus.setText(getString(R.string.unsupported_video_type, getDisplayName(videoUri)));
+            return;
+        }
+        startVideoSubtitlePipeline(videoUri);
     }
 
 
@@ -541,6 +596,7 @@ public class MainActivity extends AppCompatActivity {
                 VideoSubtitleJob job = new VideoSubtitleJob();
                 job.videoUri = videoUri;
                 job.videoDisplayName = getDisplayName(videoUri);
+                job.subtitleLanguageCode = selectedSubtitleOutputOption.languageCode;
                 job.durationMs = getDurationMs(videoUri);
                 job.wavFile = wavFile;
                 pendingVideoSubtitleJob = job;
@@ -583,7 +639,7 @@ public class MainActivity extends AppCompatActivity {
 
     private void finishVideoSubtitleJob(VideoSubtitleJob job) {
         new Thread(() -> {
-            String subtitleFileName = getSrtFileName(job.videoDisplayName);
+            String subtitleFileName = getSrtFileName(job.videoDisplayName, job.subtitleLanguageCode);
             String srtText = buildSrt(job.transcript.toString(), job.durationMs);
             try {
                 Uri srtUri = createSiblingSubtitleUri(job.videoUri, subtitleFileName);
@@ -714,10 +770,10 @@ public class MainActivity extends AppCompatActivity {
         return lastSegment == null ? "video" : lastSegment;
     }
 
-    private String getSrtFileName(String videoDisplayName) {
+    private String getSrtFileName(String videoDisplayName, String languageCode) {
         int dotIndex = videoDisplayName.lastIndexOf('.');
         String baseName = dotIndex > 0 ? videoDisplayName.substring(0, dotIndex) : videoDisplayName;
-        return baseName + ".srt";
+        return baseName + "." + languageCode + ".srt";
     }
 
     private String sanitizeFileName(String fileName) {
@@ -726,6 +782,28 @@ public class MainActivity extends AppCompatActivity {
 
     private String quotePath(String path) {
         return "'" + path.replace("'", "'\\''") + "'";
+    }
+
+    private boolean isSupportedVideoUri(Uri videoUri) {
+        String mimeType = getContentResolver().getType(videoUri);
+        if (mimeType != null) {
+            for (String supportedMimeType : SUPPORTED_VIDEO_MIME_TYPES) {
+                if ("video/*".equals(supportedMimeType) && mimeType.startsWith("video/")) {
+                    return true;
+                }
+                if (supportedMimeType.equalsIgnoreCase(mimeType)) {
+                    return true;
+                }
+            }
+        }
+
+        String displayName = getDisplayName(videoUri).toLowerCase(Locale.US);
+        for (String extension : SUPPORTED_VIDEO_EXTENSIONS) {
+            if (displayName.endsWith(extension)) {
+                return true;
+            }
+        }
+        return false;
     }
 
     private void refreshModelFiles() {
@@ -743,6 +821,13 @@ public class MainActivity extends AppCompatActivity {
         waveFiles.clear();
         waveFiles.addAll(getFilesWithExtension(sdcardDataFolder, ".wav"));
         spinnerWave.setAdapter(getFileArrayAdapter(waveFiles));
+    }
+
+    private @NonNull ArrayAdapter<SubtitleOutputOption> getSubtitleOutputAdapter() {
+        ArrayAdapter<SubtitleOutputOption> adapter =
+                new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, subtitleOutputOptions);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return adapter;
     }
 
     private void updateModelAvailabilityUi() {
@@ -990,9 +1075,26 @@ public class MainActivity extends AppCompatActivity {
     static class VideoSubtitleJob {
         Uri videoUri;
         String videoDisplayName;
+        String subtitleLanguageCode;
         long durationMs;
         File wavFile;
         final StringBuilder transcript = new StringBuilder();
+    }
+
+    static class SubtitleOutputOption {
+        final String displayName;
+        final String languageCode;
+
+        SubtitleOutputOption(String displayName, String languageCode) {
+            this.displayName = displayName;
+            this.languageCode = languageCode;
+        }
+
+        @NonNull
+        @Override
+        public String toString() {
+            return displayName + " (" + languageCode + ")";
+        }
     }
 
     static class SharedResource {

@@ -7,4 +7,5 @@
     <string name="processing">Processing...</string>
     <string name="stop">Stop</string>
     <string name="need_record_audio_permission">"This app needs RECORD_AUDIO permission"</string>
+    <string name="pick_video_create_srt">Pick video and create SRT</string>
 </resources>

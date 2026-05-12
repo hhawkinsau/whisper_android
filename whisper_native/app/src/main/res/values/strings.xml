@@ -18,4 +18,10 @@
     <string name="srt_saved_beside_video">SRT saved beside video: %1$s</string>
     <string name="srt_saved_to_folder">SRT saved to selected folder: %1$s</string>
     <string name="srt_save_failed">SRT save failed: %1$s</string>
+    <string name="download_large_v3_turbo">Download large-v3-turbo from Hugging Face</string>
+    <string name="download_model_first">Download the large-v3-turbo model first.</string>
+    <string name="downloading_model_file">Downloading %1$s from Hugging Face...</string>
+    <string name="model_download_failed">Model download failed: %1$s</string>
+    <string name="model_download_in_progress">Model download in progress...</string>
+    <string name="model_ready">Model ready: %1$s</string>
 </resources>

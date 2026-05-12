@@ -3,12 +3,19 @@ package com.whispertflite;
 import android.Manifest;
 import android.content.ClipData;
 import android.content.ClipboardManager;
+import android.content.ContentResolver;
 import android.content.Context;
+import android.content.Intent;
 import android.content.pm.PackageManager;
 import android.content.res.AssetManager;
+import android.database.Cursor;
+import android.media.MediaMetadataRetriever;
+import android.net.Uri;
 import android.os.Bundle;
 import android.os.Handler;
 import android.os.Looper;
+import android.provider.DocumentsContract;
+import android.provider.OpenableColumns;
 import android.util.Log;
 import android.view.View;
 import android.view.ViewGroup;
@@ -18,15 +25,20 @@ import android.widget.Button;
 import android.widget.Spinner;
 import android.widget.TextView;
 
+import androidx.activity.result.ActivityResultLauncher;
+import androidx.activity.result.contract.ActivityResultContracts;
 import androidx.annotation.NonNull;
 import androidx.appcompat.app.AppCompatActivity;
 import androidx.core.content.ContextCompat;
 
+import com.arthenica.ffmpegkit.FFmpegKit;
+import com.arthenica.ffmpegkit.FFmpegSession;
+import com.arthenica.ffmpegkit.ReturnCode;
 import com.google.android.material.floatingactionbutton.FloatingActionButton;
 import com.whispertflite.asr.Player;
-import com.whispertflite.utils.WaveUtil;
 import com.whispertflite.asr.Recorder;
 import com.whispertflite.asr.Whisper;
+import com.whispertflite.utils.WaveUtil;
 
 import java.io.File;
 import java.io.FileOutputStream;
@@ -34,17 +46,25 @@ import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.util.ArrayList;
+import java.util.Locale;
 
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
     // whisper-tiny.tflite and whisper-base-nooptim.en.tflite works well
     private static final String DEFAULT_MODEL_TO_USE = "whisper-tiny.tflite";
+    private static final String[] PREFERRED_MODEL_NAMES = {
+            "whisper-large-v3.tflite",
+            "whisper-large-v3-turbo.tflite",
+            "whisper-large-v3.en.tflite",
+            DEFAULT_MODEL_TO_USE
+    };
     // English only model ends with extension ".en.tflite"
     private static final String ENGLISH_ONLY_MODEL_EXTENSION = ".en.tflite";
     private static final String ENGLISH_ONLY_VOCAB_FILE = "filters_vocab_en.bin";
     private static final String MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual.bin";
     private static final String[] EXTENSIONS_TO_COPY = {"tflite", "bin", "wav", "pcm"};
+    private static final String EXTRACTED_VIDEO_WAV = "selected_video_audio.wav";
 
     private TextView tvStatus;
     private TextView tvResult;
@@ -52,6 +72,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnRecord;
     private Button btnPlay;
     private Button btnTranscribe;
+    private Button btnPickVideo;
 
     private Player mPlayer = null;
     private Recorder mRecorder = null;
@@ -65,6 +86,11 @@ public class MainActivity extends AppCompatActivity {
     private final boolean loopTesting = false;
     private final SharedResource transcriptionSync = new SharedResource();
     private final Handler handler = new Handler(Looper.getMainLooper());
+    private ActivityResultLauncher<Intent> videoPickerLauncher;
+    private ActivityResultLauncher<Intent> subtitleFolderLauncher;
+    private VideoSubtitleJob pendingVideoSubtitleJob;
+    private String pendingSubtitleText;
+    private String pendingSubtitleFileName;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -75,19 +101,64 @@ public class MainActivity extends AppCompatActivity {
         sdcardDataFolder = this.getExternalFilesDir(null);
         copyAssetsToSdcard(this, sdcardDataFolder, EXTENSIONS_TO_COPY);
 
+        tvStatus = findViewById(R.id.tvStatus);
+        tvResult = findViewById(R.id.tvResult);
+        btnRecord = findViewById(R.id.btnRecord);
+        btnPlay = findViewById(R.id.btnPlay);
+        btnTranscribe = findViewById(R.id.btnTranscb);
+        btnPickVideo = findViewById(R.id.btnPickVideo);
+        fabCopy = findViewById(R.id.fabCopy);
+
+        videoPickerLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Uri videoUri = result.getData().getData();
+                        if (videoUri != null) {
+                            persistVideoUriPermission(result.getData(), videoUri);
+                            startVideoSubtitlePipeline(videoUri);
+                        }
+                    }
+                });
+        subtitleFolderLauncher = registerForActivityResult(
+                new ActivityResultContracts.StartActivityForResult(),
+                result -> {
+                    if (result.getResultCode() == RESULT_OK && result.getData() != null) {
+                        Uri treeUri = result.getData().getData();
+                        if (treeUri != null) {
+                            persistTreeUriPermission(result.getData(), treeUri);
+                            writePendingSubtitleToTree(treeUri);
+                        }
+                    } else {
+                        clearPendingSubtitleWrite();
+                        resetVideoSubtitleJob();
+                        tvStatus.setText("Folder permission cancelled. SRT was not saved.");
+                    }
+                });
+
         ArrayList<File> tfliteFiles = getFilesWithExtension(sdcardDataFolder, ".tflite");
         ArrayList<File> waveFiles = getFilesWithExtension(sdcardDataFolder, ".wav");
 
-        // Initialize default model to use
-        selectedTfliteFile = new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE);
+        // Initialize default model to use, preferring large-v3 over older large variants when available.
+        selectedTfliteFile = chooseDefaultModelFile(tfliteFiles);
 
         Spinner spinnerTflite = findViewById(R.id.spnrTfliteFiles);
         spinnerTflite.setAdapter(getFileArrayAdapter(tfliteFiles));
+        int defaultModelIndex = tfliteFiles.indexOf(selectedTfliteFile);
+        if (defaultModelIndex >= 0) {
+            spinnerTflite.setSelection(defaultModelIndex);
+        }
+        final File largeV3Model = findLargeV3Model(tfliteFiles);
         spinnerTflite.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
+                File candidateModel = (File) parent.getItemAtPosition(position);
+                if (largeV3Model != null && isDeprecatedLargeModel(candidateModel.getName())) {
+                    spinnerTflite.setSelection(tfliteFiles.indexOf(largeV3Model));
+                    return;
+                }
                 deinitModel();
-                selectedTfliteFile = (File) parent.getItemAtPosition(position);
+                selectedTfliteFile = candidateModel;
             }
 
             @Override
@@ -119,7 +190,6 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Implementation of record button functionality
-        btnRecord = findViewById(R.id.btnRecord);
         btnRecord.setOnClickListener(v -> {
             if (mRecorder != null && mRecorder.isInProgress()) {
                 Log.d(TAG, "Recording is in progress... stopping...");
@@ -131,8 +201,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Implementation of Play button functionality
-        btnPlay = findViewById(R.id.btnPlay);
         btnPlay.setOnClickListener(v -> {
+            if (selectedWaveFile == null) return;
             if(!mPlayer.isPlaying()) {
                 mPlayer.initializePlayer(selectedWaveFile.getAbsolutePath());
                 mPlayer.startPlayback();
@@ -142,8 +212,8 @@ public class MainActivity extends AppCompatActivity {
         });
 
         // Implementation of transcribe button functionality
-        btnTranscribe = findViewById(R.id.btnTranscb);
         btnTranscribe.setOnClickListener(v -> {
+            if (selectedWaveFile == null) return;
             if (mRecorder != null && mRecorder.isInProgress()) {
                 Log.d(TAG, "Recording is in progress... stopping...");
                 stopRecording();
@@ -154,6 +224,7 @@ public class MainActivity extends AppCompatActivity {
 
             if (!mWhisper.isInProgress()) {
                 Log.d(TAG, "Start transcription...");
+                pendingVideoSubtitleJob = null;
                 startTranscription(selectedWaveFile.getAbsolutePath());
 
                 // only for loop testing
@@ -176,9 +247,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
 
-        tvStatus = findViewById(R.id.tvStatus);
-        tvResult = findViewById(R.id.tvResult);
-        fabCopy = findViewById(R.id.fabCopy);
+        btnPickVideo.setOnClickListener(v -> openVideoPicker());
+
         fabCopy.setOnClickListener(v -> {
             // Get the text from tvResult
             String textToCopy = tvResult.getText().toString();
@@ -228,8 +298,34 @@ public class MainActivity extends AppCompatActivity {
         // Assume this Activity is the current activity, check record permission
         checkRecordPermission();
 
+        handleIncomingVideoIntent(getIntent());
+
         // for debugging
 //        testParallelProcessing();
+    }
+
+    @Override
+    protected void onNewIntent(Intent intent) {
+        super.onNewIntent(intent);
+        setIntent(intent);
+        handleIncomingVideoIntent(intent);
+    }
+
+    private void handleIncomingVideoIntent(Intent intent) {
+        if (intent == null) {
+            return;
+        }
+        Uri videoUri = null;
+        String action = intent.getAction();
+        if (Intent.ACTION_VIEW.equals(action)) {
+            videoUri = intent.getData();
+        } else if (Intent.ACTION_SEND.equals(action)) {
+            videoUri = (Uri) intent.getParcelableExtra(Intent.EXTRA_STREAM);
+        }
+        if (videoUri != null) {
+            persistVideoUriPermission(intent, videoUri);
+            startVideoSubtitlePipeline(videoUri);
+        }
     }
 
     // Model initialization
@@ -248,15 +344,24 @@ public class MainActivity extends AppCompatActivity {
                 if (message.equals(Whisper.MSG_PROCESSING)) {
                     handler.post(() -> tvStatus.setText(message));
                     handler.post(() -> tvResult.setText(""));
+                    VideoSubtitleJob job = pendingVideoSubtitleJob;
+                    if (job != null) {
+                        job.transcript.setLength(0);
+                    }
                     startTime = System.currentTimeMillis();
-                } if (message.equals(Whisper.MSG_PROCESSING_DONE)) {
-//                    handler.post(() -> tvStatus.setText(message));
+                }
+                if (message.equals(Whisper.MSG_PROCESSING_DONE)) {
+                    VideoSubtitleJob job = pendingVideoSubtitleJob;
+                    if (job != null) {
+                        finishVideoSubtitleJob(job);
+                    }
                     // for testing
                     if (loopTesting)
                         transcriptionSync.sendSignal();
                 } else if (message.equals(Whisper.MSG_FILE_NOT_FOUND)) {
                     handler.post(() -> tvStatus.setText(message));
                     Log.d(TAG, "File not found error...!");
+                    resetVideoSubtitleJob();
                 }
             }
 
@@ -266,6 +371,10 @@ public class MainActivity extends AppCompatActivity {
                 handler.post(() -> tvStatus.setText("Processing done in " + timeTaken + "ms"));
 
                 Log.d(TAG, "Result: " + result);
+                VideoSubtitleJob job = pendingVideoSubtitleJob;
+                if (job != null) {
+                    job.transcript.append(result);
+                }
                 handler.post(() -> tvResult.append(result));
             }
         });
@@ -298,6 +407,309 @@ public class MainActivity extends AppCompatActivity {
         };
         adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
         return adapter;
+    }
+
+    private File chooseDefaultModelFile(ArrayList<File> modelFiles) {
+        for (String preferredModelName : PREFERRED_MODEL_NAMES) {
+            File preferredModel = findModelByName(modelFiles, preferredModelName);
+            if (preferredModel != null) {
+                return preferredModel;
+            }
+        }
+
+        File largeV3Model = findLargeV3Model(modelFiles);
+        if (largeV3Model != null) {
+            return largeV3Model;
+        }
+
+        for (File modelFile : modelFiles) {
+            if (!isDeprecatedLargeModel(modelFile.getName())) {
+                return modelFile;
+            }
+        }
+
+        return modelFiles.isEmpty() ? new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE) : modelFiles.get(0);
+    }
+
+    private File findModelByName(ArrayList<File> modelFiles, String fileName) {
+        for (File modelFile : modelFiles) {
+            if (modelFile.getName().equalsIgnoreCase(fileName)) {
+                return modelFile;
+            }
+        }
+        return null;
+    }
+
+    private File findLargeV3Model(ArrayList<File> modelFiles) {
+        for (File modelFile : modelFiles) {
+            String normalizedName = modelFile.getName().toLowerCase(Locale.US);
+            if (normalizedName.contains("large-v3") || normalizedName.contains("large_v3")) {
+                return modelFile;
+            }
+        }
+        return null;
+    }
+
+    private boolean isDeprecatedLargeModel(String modelName) {
+        String normalizedName = modelName.toLowerCase(Locale.US);
+        return normalizedName.contains("large")
+                && !normalizedName.contains("large-v3")
+                && !normalizedName.contains("large_v3");
+    }
+
+    private void openVideoPicker() {
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT);
+        intent.addCategory(Intent.CATEGORY_OPENABLE);
+        intent.setType("video/*");
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION);
+        videoPickerLauncher.launch(intent);
+    }
+
+
+    private void persistVideoUriPermission(Intent intent, Uri videoUri) {
+        int takeFlags = intent.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        if (takeFlags == 0) {
+            return;
+        }
+        try {
+            getContentResolver().takePersistableUriPermission(videoUri, takeFlags);
+        } catch (SecurityException e) {
+            Log.w(TAG, "Could not persist selected video URI permission", e);
+        }
+    }
+
+    private void persistTreeUriPermission(Intent intent, Uri treeUri) {
+        int takeFlags = intent.getFlags() & (Intent.FLAG_GRANT_READ_URI_PERMISSION | Intent.FLAG_GRANT_WRITE_URI_PERMISSION);
+        if (takeFlags == 0) {
+            return;
+        }
+        try {
+            getContentResolver().takePersistableUriPermission(treeUri, takeFlags);
+        } catch (SecurityException e) {
+            Log.w(TAG, "Could not persist subtitle folder URI permission", e);
+        }
+    }
+
+    private void startVideoSubtitlePipeline(Uri videoUri) {
+        if (mWhisper != null && mWhisper.isInProgress()) {
+            handler.post(() -> tvStatus.setText("Whisper is already in progress"));
+            return;
+        }
+
+        btnPickVideo.setEnabled(false);
+        tvResult.setText("");
+        tvStatus.setText("Preparing selected video...");
+
+        new Thread(() -> {
+            try {
+                File cachedVideo = copyUriToCache(videoUri);
+                File wavFile = new File(sdcardDataFolder, EXTRACTED_VIDEO_WAV);
+                extractAudioToWav(cachedVideo, wavFile);
+
+                VideoSubtitleJob job = new VideoSubtitleJob();
+                job.videoUri = videoUri;
+                job.videoDisplayName = getDisplayName(videoUri);
+                job.durationMs = getDurationMs(videoUri);
+                job.wavFile = wavFile;
+                pendingVideoSubtitleJob = job;
+
+                handler.post(() -> tvStatus.setText("Audio extracted. Starting Whisper..."));
+                if (mWhisper == null) {
+                    initModel(selectedTfliteFile);
+                }
+                startTranscription(wavFile.getAbsolutePath());
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to create subtitles for selected video", e);
+                handler.post(() -> tvStatus.setText("Video subtitle failed: " + e.getMessage()));
+                resetVideoSubtitleJob();
+            }
+        }).start();
+    }
+
+    private File copyUriToCache(Uri uri) throws IOException {
+        String displayName = sanitizeFileName(getDisplayName(uri));
+        File output = new File(getCacheDir(), displayName.isEmpty() ? "selected_video" : displayName);
+        try (InputStream inputStream = getContentResolver().openInputStream(uri);
+             OutputStream outputStream = new FileOutputStream(output)) {
+            if (inputStream == null) {
+                throw new IOException("Cannot open selected video");
+            }
+            byte[] buffer = new byte[1024 * 64];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+        }
+        return output;
+    }
+
+    private void extractAudioToWav(File videoFile, File wavFile) throws IOException {
+        handler.post(() -> tvStatus.setText("Extracting 16 kHz mono WAV with FFmpeg..."));
+        String command = String.format(Locale.US, "-y -i %s -vn -acodec pcm_s16le -ar 16000 -ac 1 %s",
+                quotePath(videoFile.getAbsolutePath()), quotePath(wavFile.getAbsolutePath()));
+        FFmpegSession session = FFmpegKit.execute(command);
+        if (!ReturnCode.isSuccess(session.getReturnCode())) {
+            throw new IOException("FFmpeg extraction failed: " + session.getFailStackTrace());
+        }
+    }
+
+    private void finishVideoSubtitleJob(VideoSubtitleJob job) {
+        new Thread(() -> {
+            String subtitleFileName = getSrtFileName(job.videoDisplayName);
+            String srtText = buildSrt(job.transcript.toString(), job.durationMs);
+            try {
+                Uri srtUri = createSiblingSubtitleUri(job.videoUri, subtitleFileName);
+                writeTextToUri(srtUri, srtText);
+                handler.post(() -> tvStatus.setText("SRT saved beside video: " + subtitleFileName));
+                resetVideoSubtitleJob();
+            } catch (Exception e) {
+                Log.w(TAG, "Direct sibling SRT save failed; requesting folder permission", e);
+                pendingSubtitleText = srtText;
+                pendingSubtitleFileName = subtitleFileName;
+                handler.post(() -> requestSubtitleFolderPermission(subtitleFileName));
+            }
+        }).start();
+    }
+
+    private Uri createSiblingSubtitleUri(Uri videoUri, String subtitleName) throws IOException {
+        ContentResolver resolver = getContentResolver();
+        if (DocumentsContract.isDocumentUri(this, videoUri)) {
+            String docId = DocumentsContract.getDocumentId(videoUri);
+            int slashIndex = docId.lastIndexOf('/');
+            if (slashIndex > 0) {
+                String parentDocId = docId.substring(0, slashIndex);
+                Uri treeUri = DocumentsContract.buildTreeDocumentUri(videoUri.getAuthority(), parentDocId);
+                Uri parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, parentDocId);
+                Uri subtitleUri = DocumentsContract.createDocument(resolver, parentUri, "application/x-subrip", subtitleName);
+                if (subtitleUri != null) {
+                    return subtitleUri;
+                }
+            }
+        }
+        throw new IOException("Cannot create subtitle next to this provider's video without folder access");
+    }
+
+    private void requestSubtitleFolderPermission(String subtitleFileName) {
+        tvStatus.setText("Choose the video's folder to save " + subtitleFileName);
+        Intent intent = new Intent(Intent.ACTION_OPEN_DOCUMENT_TREE);
+        intent.addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION
+                | Intent.FLAG_GRANT_WRITE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PERSISTABLE_URI_PERMISSION
+                | Intent.FLAG_GRANT_PREFIX_URI_PERMISSION);
+        subtitleFolderLauncher.launch(intent);
+    }
+
+    private void writePendingSubtitleToTree(Uri treeUri) {
+        String subtitleText = pendingSubtitleText;
+        String subtitleFileName = pendingSubtitleFileName;
+        if (subtitleText == null || subtitleFileName == null) {
+            return;
+        }
+
+        new Thread(() -> {
+            try {
+                String treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri);
+                Uri parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocumentId);
+                Uri subtitleUri = DocumentsContract.createDocument(
+                        getContentResolver(), parentUri, "application/x-subrip", subtitleFileName);
+                if (subtitleUri == null) {
+                    throw new IOException("Cannot create subtitle in selected folder");
+                }
+                writeTextToUri(subtitleUri, subtitleText);
+                handler.post(() -> tvStatus.setText("SRT saved to selected folder: " + subtitleFileName));
+            } catch (Exception e) {
+                Log.e(TAG, "Failed to write subtitle to selected folder", e);
+                handler.post(() -> tvStatus.setText("SRT save failed: " + e.getMessage()));
+            } finally {
+                clearPendingSubtitleWrite();
+                resetVideoSubtitleJob();
+            }
+        }).start();
+    }
+
+    private void writeTextToUri(Uri uri, String text) throws IOException {
+        try (OutputStream outputStream = getContentResolver().openOutputStream(uri, "wt")) {
+            if (outputStream == null) {
+                throw new IOException("Cannot open subtitle destination");
+            }
+            outputStream.write(text.getBytes(java.nio.charset.StandardCharsets.UTF_8));
+        }
+    }
+
+    private void clearPendingSubtitleWrite() {
+        pendingSubtitleText = null;
+        pendingSubtitleFileName = null;
+    }
+
+    private String buildSrt(String transcript, long durationMs) {
+        long safeDurationMs = Math.max(durationMs, 1000L);
+        return "1\n" + formatSrtTimestamp(0) + " --> " + formatSrtTimestamp(safeDurationMs) + "\n"
+                + transcript.trim() + "\n";
+    }
+
+    private String formatSrtTimestamp(long timeMs) {
+        long hours = timeMs / 3_600_000L;
+        long minutes = (timeMs % 3_600_000L) / 60_000L;
+        long seconds = (timeMs % 60_000L) / 1_000L;
+        long millis = timeMs % 1_000L;
+        return String.format(Locale.US, "%02d:%02d:%02d,%03d", hours, minutes, seconds, millis);
+    }
+
+    private long getDurationMs(Uri uri) {
+        MediaMetadataRetriever retriever = new MediaMetadataRetriever();
+        try {
+            retriever.setDataSource(this, uri);
+            String duration = retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION);
+            if (duration != null) {
+                return Long.parseLong(duration);
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not read video duration", e);
+        } finally {
+            try {
+                retriever.release();
+            } catch (IOException e) {
+                Log.w(TAG, "Could not release metadata retriever", e);
+            }
+        }
+        return 1000L;
+    }
+
+    private String getDisplayName(Uri uri) {
+        try (Cursor cursor = getContentResolver().query(uri, new String[]{OpenableColumns.DISPLAY_NAME}, null, null, null)) {
+            if (cursor != null && cursor.moveToFirst()) {
+                int nameIndex = cursor.getColumnIndex(OpenableColumns.DISPLAY_NAME);
+                if (nameIndex >= 0) {
+                    String displayName = cursor.getString(nameIndex);
+                    if (displayName != null) {
+                        return displayName;
+                    }
+                }
+            }
+        } catch (Exception e) {
+            Log.w(TAG, "Could not read display name", e);
+        }
+        String lastSegment = uri.getLastPathSegment();
+        return lastSegment == null ? "video" : lastSegment;
+    }
+
+    private String getSrtFileName(String videoDisplayName) {
+        int dotIndex = videoDisplayName.lastIndexOf('.');
+        String baseName = dotIndex > 0 ? videoDisplayName.substring(0, dotIndex) : videoDisplayName;
+        return baseName + ".srt";
+    }
+
+    private String sanitizeFileName(String fileName) {
+        return fileName.replaceAll("[^a-zA-Z0-9._-]", "_");
+    }
+
+    private String quotePath(String path) {
+        return "'" + path.replace("'", "'\\''") + "'";
+    }
+
+    private void resetVideoSubtitleJob() {
+        pendingVideoSubtitleJob = null;
+        handler.post(() -> btnPickVideo.setEnabled(true));
     }
 
     private void checkRecordPermission() {
@@ -401,6 +813,14 @@ public class MainActivity extends AppCompatActivity {
         return filteredFiles;
     }
 
+    static class VideoSubtitleJob {
+        Uri videoUri;
+        String videoDisplayName;
+        long durationMs;
+        File wavFile;
+        final StringBuilder transcript = new StringBuilder();
+    }
+
     static class SharedResource {
         // Synchronized method for Thread 1 to wait for a signal with a timeout
         public synchronized boolean waitForSignalWithTimeout(long timeoutMillis) {
@@ -428,45 +848,4 @@ public class MainActivity extends AppCompatActivity {
             notify();  // Notifies the waiting thread
         }
     }
-
-    // Test code for parallel processing
-//    private void testParallelProcessing() {
-//
-//        // Define the file names in an array
-//        String[] fileNames = {
-//                "english_test1.wav",
-//                "english_test2.wav",
-//                "english_test_3_bili.wav"
-//        };
-//
-//        // Multilingual model and vocab
-//        String modelMultilingual = getFilePath("whisper-tiny.tflite");
-//        String vocabMultilingual = getFilePath("filters_vocab_multilingual.bin");
-//
-//        // Perform task for multiple audio files using multilingual model
-//        for (String fileName : fileNames) {
-//            Whisper whisper = new Whisper(this);
-//            whisper.setAction(Whisper.ACTION_TRANSCRIBE);
-//            whisper.loadModel(modelMultilingual, vocabMultilingual, true);
-//            //whisper.setListener((msgID, message) -> Log.d(TAG, message));
-//            String waveFilePath = getFilePath(fileName);
-//            whisper.setFilePath(waveFilePath);
-//            whisper.start();
-//        }
-//
-//        // English-only model and vocab
-//        String modelEnglish = getFilePath("whisper-tiny-en.tflite");
-//        String vocabEnglish = getFilePath("filters_vocab_en.bin");
-//
-//        // Perform task for multiple audio files using english only model
-//        for (String fileName : fileNames) {
-//            Whisper whisper = new Whisper(this);
-//            whisper.setAction(Whisper.ACTION_TRANSCRIBE);
-//            whisper.loadModel(modelEnglish, vocabEnglish, false);
-//            //whisper.setListener((msgID, message) -> Log.d(TAG, message));
-//            String waveFilePath = getFilePath(fileName);
-//            whisper.setFilePath(waveFilePath);
-//            whisper.start();
-//        }
-//    }
 }

@@ -7,4 +7,15 @@
     <string name="processing">Processing...</string>
     <string name="stop">Stop</string>
     <string name="need_record_audio_permission">"This app needs RECORD_AUDIO permission"</string>
+    <string name="pick_video_create_srt">Pick video and create SRT</string>
+    <string name="processing_done_in">Processing done in %1$d ms</string>
+    <string name="folder_permission_cancelled">Folder permission cancelled. SRT was not saved.</string>
+    <string name="whisper_already_in_progress">Whisper is already in progress</string>
+    <string name="preparing_selected_video">Preparing selected video...</string>
+    <string name="audio_extracted_starting_whisper">Audio extracted. Starting Whisper...</string>
+    <string name="video_subtitle_failed">Video subtitle failed: %1$s</string>
+    <string name="choose_video_folder">Choose the video\'s folder to save %1$s</string>
+    <string name="srt_saved_beside_video">SRT saved beside video: %1$s</string>
+    <string name="srt_saved_to_folder">SRT saved to selected folder: %1$s</string>
+    <string name="srt_save_failed">SRT save failed: %1$s</string>
 </resources>

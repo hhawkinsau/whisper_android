@@ -992,8 +992,10 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void updateModelAvailabilityUi() {
-        boolean modelReady = hasRequiredArtifacts(selectedTfliteFile);
-        btnDownloadModel.setEnabled(selectedModelOption != null && !isModelDownloadInProgress && !modelReady);
+        boolean modelSupported = isModelSupportedByCurrentEngine(selectedTfliteFile);
+        boolean modelReady = modelSupported && hasRequiredArtifacts(selectedTfliteFile);
+        boolean modelDownloaded = hasDownloadedArtifacts(selectedTfliteFile);
+        btnDownloadModel.setEnabled(selectedModelOption != null && !isModelDownloadInProgress && !modelDownloaded && modelSupported);
         if (selectedModelOption != null) {
             btnDownloadModel.setText(getString(R.string.download_selected_model, selectedModelOption.displayName));
         }
@@ -1003,6 +1005,8 @@ public class MainActivity extends AppCompatActivity {
             tvStatus.setText(getString(R.string.model_ready, selectedTfliteFile.getName()));
         } else if (isModelDownloadInProgress) {
             tvStatus.setText(R.string.model_download_in_progress);
+        } else if (!modelSupported && selectedModelOption != null) {
+            tvStatus.setText(getString(R.string.model_unsupported_in_current_engine, selectedModelOption.displayName));
         } else {
             if (selectedModelOption != null) {
                 tvStatus.setText(getString(R.string.download_model_first, selectedModelOption.displayName));
@@ -1015,6 +1019,14 @@ public class MainActivity extends AppCompatActivity {
     private boolean ensureModelReady() {
         if (isModelDownloadInProgress) {
             tvStatus.setText(R.string.model_download_in_progress);
+            return false;
+        }
+        if (!isModelSupportedByCurrentEngine(selectedTfliteFile)) {
+            if (selectedModelOption != null) {
+                tvStatus.setText(getString(R.string.model_unsupported_in_current_engine, selectedModelOption.displayName));
+            } else {
+                tvStatus.setText(R.string.no_model_selected);
+            }
             return false;
         }
         if (!hasRequiredArtifacts(selectedTfliteFile)) {
@@ -1034,6 +1046,21 @@ public class MainActivity extends AppCompatActivity {
         }
         File vocabFile = getRequiredVocabFile(modelFile);
         return vocabFile.exists() && isValidWhisperVocabFile(vocabFile);
+    }
+
+    private boolean hasDownloadedArtifacts(File modelFile) {
+        if (modelFile == null || !modelFile.exists()) {
+            return false;
+        }
+        return getRequiredVocabFile(modelFile).exists();
+    }
+
+    private boolean isModelSupportedByCurrentEngine(File modelFile) {
+        if (modelFile == null) {
+            return false;
+        }
+        String modelName = modelFile.getName().toLowerCase(Locale.US);
+        return !modelName.contains("large-v3");
     }
 
     private File getRequiredVocabFile(File modelFile) {

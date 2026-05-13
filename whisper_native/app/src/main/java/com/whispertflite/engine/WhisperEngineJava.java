@@ -208,7 +208,8 @@ public class WhisperEngineJava implements WhisperEngine {
         if (outputTensor.dataType() != DataType.INT32) {
             throw new IllegalStateException("Unexpected Whisper output type: " + outputTensor.dataType());
         }
-        int[] outputTokens = new int[outputTensor.numElements()];
+        ByteBuffer outputBuf = ByteBuffer.allocateDirect(outputTensor.numBytes());
+        outputBuf.order(ByteOrder.nativeOrder());
 
         // Load input data
         int inputSize = inputTensor.numElements() * Float.BYTES;
@@ -229,8 +230,14 @@ public class WhisperEngineJava implements WhisperEngine {
 
 //        Log.d(TAG, "Before inference...");
         // Run inference
-        mInterpreter.run(inputBuf, outputTokens);
+        outputBuf.rewind();
+        mInterpreter.run(inputBuf, outputBuf);
 //        Log.d(TAG, "After inference...");
+        outputBuf.rewind();
+        int[] outputTokens = new int[outputTensor.numElements()];
+        for (int i = 0; i < outputTokens.length; i++) {
+            outputTokens[i] = outputBuf.getInt();
+        }
         int outputLen = outputTokens.length;
         Log.d(TAG, "output_len: " + outputLen);
         StringBuilder result = new StringBuilder();

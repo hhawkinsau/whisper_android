@@ -64,19 +64,12 @@ import java.util.Locale;
 public class MainActivity extends AppCompatActivity {
     private static final String TAG = "MainActivity";
 
-    private static final String DEFAULT_MODEL_TO_USE = "whisper-large-v3-turbo.tflite";
-    private static final String LARGE_V3_TURBO_MODEL_URL =
-            "https://huggingface.co/cik009/whisper/resolve/main/whisper-large-v3-turbo.tflite?download=true";
+    private static final String HUGGING_FACE_MODEL_BASE_URL =
+            "https://huggingface.co/cik009/whisper/resolve/main/";
+    private static final String HUGGING_FACE_DOWNLOAD_QUERY = "?download=true";
+    private static final String DEFAULT_MODEL_TO_USE = "whisper-tiny.tflite";
     private static final String LARGE_V3_MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual-v3.bin";
-    private static final String LARGE_V3_MULTILINGUAL_VOCAB_URL =
-            "https://huggingface.co/cik009/whisper/resolve/main/filters_vocab_multilingual-v3.bin?download=true";
     private static final int DOWNLOAD_BUFFER_SIZE = 1024 * 1024;
-    private static final String[] PREFERRED_MODEL_NAMES = {
-            "whisper-large-v3-turbo.tflite",
-            "whisper-large-v3.tflite",
-            "whisper-large-v3.en.tflite",
-            DEFAULT_MODEL_TO_USE
-    };
     // English only model ends with extension ".en.tflite"
     private static final String ENGLISH_ONLY_MODEL_EXTENSION = ".en.tflite";
     private static final String ENGLISH_ONLY_VOCAB_FILE = "filters_vocab_en.bin";
@@ -121,8 +114,19 @@ public class MainActivity extends AppCompatActivity {
     private File sdcardDataFolder = null;
     private File selectedWaveFile = null;
     private File selectedTfliteFile = null;
-    private final ArrayList<File> tfliteFiles = new ArrayList<>();
     private final ArrayList<File> waveFiles = new ArrayList<>();
+    private final ArrayList<ModelOption> modelOptions = new ArrayList<>(Arrays.asList(
+            new ModelOption("Tiny (multilingual, recommended)", "whisper-tiny.tflite", MULTILINGUAL_VOCAB_FILE),
+            new ModelOption("Tiny English", "whisper-tiny.en.tflite", ENGLISH_ONLY_VOCAB_FILE),
+            new ModelOption("Base (multilingual)", "whisper-base.tflite", MULTILINGUAL_VOCAB_FILE),
+            new ModelOption("Base English", "whisper-base.en.tflite", ENGLISH_ONLY_VOCAB_FILE),
+            new ModelOption("Small (multilingual)", "whisper-small.tflite", MULTILINGUAL_VOCAB_FILE),
+            new ModelOption("Small English", "whisper-small.en.tflite", ENGLISH_ONLY_VOCAB_FILE),
+            new ModelOption("Medium (multilingual)", "whisper-medium.tflite", MULTILINGUAL_VOCAB_FILE),
+            new ModelOption("Medium English", "whisper-medium.en.tflite", ENGLISH_ONLY_VOCAB_FILE),
+            new ModelOption("Large v3 Turbo", "whisper-large-v3-turbo.tflite", LARGE_V3_MULTILINGUAL_VOCAB_FILE),
+            new ModelOption("Large v3", "whisper-large-v3.tflite", LARGE_V3_MULTILINGUAL_VOCAB_FILE)
+    ));
     private final ArrayList<SubtitleOutputOption> subtitleOutputOptions = new ArrayList<>(Arrays.asList(
             new SubtitleOutputOption("English", "en"),
             new SubtitleOutputOption("Arabic", "ar"),
@@ -135,6 +139,7 @@ public class MainActivity extends AppCompatActivity {
             new SubtitleOutputOption("Mandarin Chinese", "zh-CN")
     ));
     private boolean isModelDownloadInProgress = false;
+    private ModelOption selectedModelOption = null;
     private SubtitleOutputOption selectedSubtitleOutputOption = subtitleOutputOptions.get(0);
     private String latestTranscriptText = "";
 
@@ -220,23 +225,22 @@ public class MainActivity extends AppCompatActivity {
         spinnerTflite.setOnItemSelectedListener(new AdapterView.OnItemSelectedListener() {
             @Override
             public void onItemSelected(AdapterView<?> parent, View view, int position, long id) {
-                File candidateModel = (File) parent.getItemAtPosition(position);
+                ModelOption candidateModel = (ModelOption) parent.getItemAtPosition(position);
                 if (candidateModel == null) {
+                    selectedModelOption = null;
                     selectedTfliteFile = null;
-                    return;
-                }
-                File largeV3Model = findLargeV3Model(tfliteFiles);
-                if (largeV3Model != null && isDeprecatedLargeModel(candidateModel.getName())) {
-                    spinnerTflite.setSelection(tfliteFiles.indexOf(largeV3Model));
+                    updateModelAvailabilityUi();
                     return;
                 }
                 deinitModel();
-                selectedTfliteFile = candidateModel;
+                selectedModelOption = candidateModel;
+                selectedTfliteFile = candidateModel.getModelFile(sdcardDataFolder);
                 updateModelAvailabilityUi();
             }
 
             @Override
             public void onNothingSelected(AdapterView<?> parent) {
+                selectedModelOption = null;
                 selectedTfliteFile = null;
                 updateModelAvailabilityUi();
             }
@@ -261,7 +265,7 @@ public class MainActivity extends AppCompatActivity {
                 // Handle case when nothing is selected, if needed
             }
         });
-        btnDownloadModel.setOnClickListener(v -> downloadDefaultModelArtifacts());
+        btnDownloadModel.setOnClickListener(v -> downloadSelectedModelArtifacts());
 
         // Implementation of record button functionality
         btnRecord.setOnClickListener(v -> {
@@ -412,13 +416,17 @@ public class MainActivity extends AppCompatActivity {
     // Model initialization
     private boolean initModel(File modelFile) {
         if (modelFile == null || !modelFile.exists()) {
-            handler.post(() -> tvStatus.setText(R.string.download_model_first));
+            handler.post(() -> tvStatus.setText(selectedModelOption == null
+                    ? getString(R.string.no_model_selected)
+                    : getString(R.string.download_model_first, selectedModelOption.displayName)));
             return false;
         }
         boolean isMultilingualModel = !(modelFile.getName().endsWith(ENGLISH_ONLY_MODEL_EXTENSION));
         File vocabFile = getRequiredVocabFile(modelFile);
         if (!vocabFile.exists()) {
-            handler.post(() -> tvStatus.setText(R.string.download_model_first));
+            handler.post(() -> tvStatus.setText(selectedModelOption == null
+                    ? getString(R.string.no_model_selected)
+                    : getString(R.string.download_model_first, selectedModelOption.displayName)));
             return false;
         }
 
@@ -516,52 +524,13 @@ public class MainActivity extends AppCompatActivity {
         return adapter;
     }
 
-    private File chooseDefaultModelFile(ArrayList<File> modelFiles) {
-        for (String preferredModelName : PREFERRED_MODEL_NAMES) {
-            File preferredModel = findModelByName(modelFiles, preferredModelName);
-            if (preferredModel != null) {
-                return preferredModel;
+    private ModelOption chooseDefaultModelOption() {
+        for (ModelOption modelOption : modelOptions) {
+            if (DEFAULT_MODEL_TO_USE.equalsIgnoreCase(modelOption.fileName)) {
+                return modelOption;
             }
         }
-
-        File largeV3Model = findLargeV3Model(modelFiles);
-        if (largeV3Model != null) {
-            return largeV3Model;
-        }
-
-        for (File modelFile : modelFiles) {
-            if (!isDeprecatedLargeModel(modelFile.getName())) {
-                return modelFile;
-            }
-        }
-
-        return modelFiles.isEmpty() ? null : modelFiles.get(0);
-    }
-
-    private File findModelByName(ArrayList<File> modelFiles, String fileName) {
-        for (File modelFile : modelFiles) {
-            if (modelFile.getName().equalsIgnoreCase(fileName)) {
-                return modelFile;
-            }
-        }
-        return null;
-    }
-
-    private File findLargeV3Model(ArrayList<File> modelFiles) {
-        for (File modelFile : modelFiles) {
-            String normalizedName = modelFile.getName().toLowerCase(Locale.US);
-            if (normalizedName.contains("large-v3") || normalizedName.contains("large_v3")) {
-                return modelFile;
-            }
-        }
-        return null;
-    }
-
-    private boolean isDeprecatedLargeModel(String modelName) {
-        String normalizedName = modelName.toLowerCase(Locale.US);
-        return normalizedName.contains("large")
-                && !normalizedName.contains("large-v3")
-                && !normalizedName.contains("large_v3");
+        return modelOptions.isEmpty() ? null : modelOptions.get(0);
     }
 
     private void openVideoPicker() {
@@ -931,11 +900,12 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void refreshModelFiles() {
-        tfliteFiles.clear();
-        tfliteFiles.addAll(getFilesWithExtension(sdcardDataFolder, ".tflite"));
-        spinnerTflite.setAdapter(getFileArrayAdapter(tfliteFiles));
-        selectedTfliteFile = chooseDefaultModelFile(tfliteFiles);
-        int selectedIndex = selectedTfliteFile == null ? -1 : tfliteFiles.indexOf(selectedTfliteFile);
+        spinnerTflite.setAdapter(getModelOptionAdapter());
+        if (selectedModelOption == null) {
+            selectedModelOption = chooseDefaultModelOption();
+        }
+        selectedTfliteFile = selectedModelOption == null ? null : selectedModelOption.getModelFile(sdcardDataFolder);
+        int selectedIndex = selectedModelOption == null ? -1 : modelOptions.indexOf(selectedModelOption);
         if (selectedIndex >= 0) {
             spinnerTflite.setSelection(selectedIndex);
         }
@@ -954,9 +924,19 @@ public class MainActivity extends AppCompatActivity {
         return adapter;
     }
 
+    private @NonNull ArrayAdapter<ModelOption> getModelOptionAdapter() {
+        ArrayAdapter<ModelOption> adapter =
+                new ArrayAdapter<>(this, android.R.layout.simple_spinner_item, modelOptions);
+        adapter.setDropDownViewResource(android.R.layout.simple_spinner_dropdown_item);
+        return adapter;
+    }
+
     private void updateModelAvailabilityUi() {
         boolean modelReady = hasRequiredArtifacts(selectedTfliteFile);
-        btnDownloadModel.setEnabled(!isModelDownloadInProgress && !isDefaultModelAvailable());
+        btnDownloadModel.setEnabled(selectedModelOption != null && !isModelDownloadInProgress && !modelReady);
+        if (selectedModelOption != null) {
+            btnDownloadModel.setText(getString(R.string.download_selected_model, selectedModelOption.displayName));
+        }
         btnTranscribe.setEnabled(modelReady && !isModelDownloadInProgress);
         btnPickVideo.setEnabled(modelReady && !isModelDownloadInProgress && pendingVideoSubtitleJob == null);
         if (modelReady && selectedTfliteFile != null) {
@@ -964,7 +944,11 @@ public class MainActivity extends AppCompatActivity {
         } else if (isModelDownloadInProgress) {
             tvStatus.setText(R.string.model_download_in_progress);
         } else {
-            tvStatus.setText(R.string.download_model_first);
+            if (selectedModelOption != null) {
+                tvStatus.setText(getString(R.string.download_model_first, selectedModelOption.displayName));
+            } else {
+                tvStatus.setText(R.string.no_model_selected);
+            }
         }
     }
 
@@ -974,7 +958,11 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
         if (!hasRequiredArtifacts(selectedTfliteFile)) {
-            tvStatus.setText(R.string.download_model_first);
+            if (selectedModelOption != null) {
+                tvStatus.setText(getString(R.string.download_model_first, selectedModelOption.displayName));
+            } else {
+                tvStatus.setText(R.string.no_model_selected);
+            }
             return false;
         }
         return true;
@@ -985,10 +973,6 @@ public class MainActivity extends AppCompatActivity {
             return false;
         }
         return getRequiredVocabFile(modelFile).exists();
-    }
-
-    private boolean isDefaultModelAvailable() {
-        return hasRequiredArtifacts(new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE));
     }
 
     private File getRequiredVocabFile(File modelFile) {
@@ -1003,32 +987,37 @@ public class MainActivity extends AppCompatActivity {
         return new File(sdcardDataFolder, MULTILINGUAL_VOCAB_FILE);
     }
 
-    private void downloadDefaultModelArtifacts() {
+    private void downloadSelectedModelArtifacts() {
         if (isModelDownloadInProgress) {
             tvStatus.setText(R.string.model_download_in_progress);
+            return;
+        }
+        if (selectedModelOption == null) {
+            tvStatus.setText(R.string.no_model_selected);
             return;
         }
 
         isModelDownloadInProgress = true;
         deinitModel();
         clearProgressLog();
-        appendProgressLog("Preparing model download");
+        appendProgressLog("Preparing model download for " + selectedModelOption.fileName);
         updateModelAvailabilityUi();
 
         new Thread(() -> {
-            File modelFile = new File(sdcardDataFolder, DEFAULT_MODEL_TO_USE);
-            File vocabFile = new File(sdcardDataFolder, LARGE_V3_MULTILINGUAL_VOCAB_FILE);
+            ModelOption modelOption = selectedModelOption;
+            File modelFile = modelOption.getModelFile(sdcardDataFolder);
+            File vocabFile = modelOption.getVocabFile(sdcardDataFolder);
             String failureMessage = null;
             try {
                 if (!modelFile.exists()) {
                     appendProgressLog("Downloading model " + modelFile.getName());
                     handler.post(() -> tvStatus.setText(getString(R.string.downloading_model_file, modelFile.getName())));
-                    downloadFile(LARGE_V3_TURBO_MODEL_URL, modelFile);
+                    downloadFile(modelOption.modelUrl, modelFile);
                 }
                 if (!vocabFile.exists()) {
                     appendProgressLog("Downloading vocab " + vocabFile.getName());
                     handler.post(() -> tvStatus.setText(getString(R.string.downloading_model_file, vocabFile.getName())));
-                    downloadFile(LARGE_V3_MULTILINGUAL_VOCAB_URL, vocabFile);
+                    downloadFile(modelOption.vocabUrl, vocabFile);
                 }
                 handler.post(() -> {
                     appendProgressLog("Model artifacts ready");
@@ -1226,6 +1215,36 @@ public class MainActivity extends AppCompatActivity {
         }
     }
 
+    static class ModelOption {
+        final String displayName;
+        final String fileName;
+        final String modelUrl;
+        final String vocabFileName;
+        final String vocabUrl;
+
+        ModelOption(String displayName, String fileName, String vocabFileName) {
+            this.displayName = displayName;
+            this.fileName = fileName;
+            this.modelUrl = buildHuggingFaceResolveUrl(fileName);
+            this.vocabFileName = vocabFileName;
+            this.vocabUrl = buildHuggingFaceResolveUrl(vocabFileName);
+        }
+
+        File getModelFile(File baseDirectory) {
+            return new File(baseDirectory, fileName);
+        }
+
+        File getVocabFile(File baseDirectory) {
+            return new File(baseDirectory, vocabFileName);
+        }
+
+        @NonNull
+        @Override
+        public String toString() {
+            return displayName;
+        }
+    }
+
     static class SharedResource {
         // Synchronized method for Thread 1 to wait for a signal with a timeout
         public synchronized boolean waitForSignalWithTimeout(long timeoutMillis) {
@@ -1252,5 +1271,9 @@ public class MainActivity extends AppCompatActivity {
         public synchronized void sendSignal() {
             notify();  // Notifies the waiting thread
         }
+    }
+
+    private static String buildHuggingFaceResolveUrl(String fileName) {
+        return HUGGING_FACE_MODEL_BASE_URL + fileName + HUGGING_FACE_DOWNLOAD_QUERY;
     }
 }

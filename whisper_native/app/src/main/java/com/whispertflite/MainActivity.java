@@ -23,6 +23,8 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.ImageButton;
+import android.widget.PopupMenu;
 import android.widget.ScrollView;
 import android.widget.Spinner;
 import android.widget.TextView;
@@ -103,7 +105,9 @@ public class MainActivity extends AppCompatActivity {
     private TextView tvStatus;
     private TextView tvResult;
     private TextView tvLog;
+    private View layoutAdvancedAudioTools;
     private FloatingActionButton fabCopy;
+    private ImageButton btnToolsMenu;
     private Button btnRecord;
     private Button btnPlay;
     private Button btnTranscribe;
@@ -146,6 +150,7 @@ public class MainActivity extends AppCompatActivity {
             new SubtitleOutputOption("Mandarin Chinese", "zh-CN")
     ));
     private boolean isModelDownloadInProgress = false;
+    private boolean isAdvancedAudioToolsVisible = false;
     private ModelOption selectedModelOption = null;
     private SubtitleOutputOption selectedSubtitleOutputOption = subtitleOutputOptions.get(0);
     private String latestTranscriptText = "";
@@ -173,12 +178,14 @@ public class MainActivity extends AppCompatActivity {
         tvStatus = findViewById(R.id.tvStatus);
         tvResult = findViewById(R.id.tvResult);
         tvLog = findViewById(R.id.tvLog);
+        layoutAdvancedAudioTools = findViewById(R.id.layoutAdvancedAudioTools);
         btnRecord = findViewById(R.id.btnRecord);
         btnPlay = findViewById(R.id.btnPlay);
         btnTranscribe = findViewById(R.id.btnTranscb);
         btnPickVideo = findViewById(R.id.btnPickVideo);
         btnDownloadModel = findViewById(R.id.btnDownloadModel);
         fabCopy = findViewById(R.id.fabCopy);
+        btnToolsMenu = findViewById(R.id.btnToolsMenu);
         spinnerTflite = findViewById(R.id.spnrTfliteFiles);
         spinnerWave = findViewById(R.id.spnrWaveFiles);
         spinnerOutputLanguage = findViewById(R.id.spnrOutputLanguage);
@@ -273,6 +280,8 @@ public class MainActivity extends AppCompatActivity {
             }
         });
         btnDownloadModel.setOnClickListener(v -> downloadSelectedModelArtifacts());
+        btnToolsMenu.setOnClickListener(this::showToolsMenu);
+        setAdvancedAudioToolsVisible(false);
 
         // Implementation of record button functionality
         btnRecord.setOnClickListener(v -> {
@@ -1147,6 +1156,31 @@ public class MainActivity extends AppCompatActivity {
 
     private void stopTranscription() {
         mWhisper.stop();
+    }
+
+    private void showToolsMenu(View anchor) {
+        PopupMenu popupMenu = new PopupMenu(this, anchor);
+        popupMenu.getMenu().add(
+                0,
+                1,
+                0,
+                getString(isAdvancedAudioToolsVisible ? R.string.hide_audio_tools : R.string.show_audio_tools));
+        popupMenu.setOnMenuItemClickListener(item -> {
+            if (item.getItemId() == 1) {
+                setAdvancedAudioToolsVisible(!isAdvancedAudioToolsVisible);
+                return true;
+            }
+            return false;
+        });
+        popupMenu.show();
+    }
+
+    private void setAdvancedAudioToolsVisible(boolean visible) {
+        isAdvancedAudioToolsVisible = visible;
+        layoutAdvancedAudioTools.setVisibility(visible ? View.VISIBLE : View.GONE);
+        if (visible) {
+            refreshWaveFiles();
+        }
     }
 
     // Copy assets with specified extensions to destination folder

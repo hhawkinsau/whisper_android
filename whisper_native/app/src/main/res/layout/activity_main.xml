@@ -4,32 +4,76 @@
     xmlns:tools="http://schemas.android.com/tools"
     android:layout_width="match_parent"
     android:layout_height="match_parent"
+    android:fitsSystemWindows="true"
     android:orientation="vertical"
-    android:padding="16dp"
+    android:paddingStart="16dp"
+    android:paddingTop="28dp"
+    android:paddingEnd="16dp"
+    android:paddingBottom="16dp"
     tools:context="com.whispertflite.MainActivity">
+
+    <LinearLayout
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="18dp"
+        android:gravity="center_vertical"
+        android:orientation="horizontal">
+
+        <LinearLayout
+            android:layout_width="0dp"
+            android:layout_height="wrap_content"
+            android:layout_weight="1"
+            android:orientation="vertical">
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:text="@string/header_title"
+                android:textColor="@color/colorPrimary"
+                android:textSize="24sp"
+                android:textStyle="bold" />
+
+            <TextView
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_marginTop="4dp"
+                android:text="@string/header_subtitle"
+                android:textColor="@android:color/darker_gray"
+                android:textSize="13sp" />
+        </LinearLayout>
+
+        <ImageButton
+            android:id="@+id/btnToolsMenu"
+            android:layout_width="48dp"
+            android:layout_height="48dp"
+            android:background="?android:attr/selectableItemBackgroundBorderless"
+            android:contentDescription="@string/audio_tools_menu"
+            android:padding="10dp"
+            android:src="@android:drawable/ic_menu_sort_by_size"
+            android:tint="@color/colorPrimary" />
+    </LinearLayout>
 
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="16dp"
         android:orientation="horizontal">
-<!--        android:visibility="gone">-->
 
         <TextView
             android:layout_width="60dp"
             android:layout_height="wrap_content"
-            android:textSize="15sp"
-            android:textColor="@color/colorPrimary"
-            android:text="Select model: "
+            android:layout_marginEnd="8dp"
             android:layout_weight="1"
-            android:layout_marginEnd="8dp" />
+            android:text="@string/select_model"
+            android:textColor="@color/colorPrimary"
+            android:textSize="15sp" />
 
         <Spinner
             android:id="@+id/spnrTfliteFiles"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
-            android:layout_weight="5"
-            android:layout_marginEnd="4dp" />
+            android:layout_marginEnd="4dp"
+            android:layout_weight="5" />
     </LinearLayout>
 
     <Button
@@ -64,29 +108,6 @@
             android:layout_weight="5" />
     </LinearLayout>
 
-    <LinearLayout
-        android:layout_width="match_parent"
-        android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
-        android:orientation="horizontal">
-
-        <TextView
-            android:layout_width="65dp"
-            android:layout_height="wrap_content"
-            android:textSize="15sp"
-            android:textColor="@color/colorPrimary"
-            android:text="Select input file: "
-            android:layout_weight="1"
-            android:layout_marginEnd="8dp" />
-
-        <Spinner
-            android:id="@+id/spnrWaveFiles"
-            android:layout_width="0dp"
-            android:layout_height="wrap_content"
-            android:layout_weight="5"
-            android:layout_marginEnd="4dp" />
-    </LinearLayout>
-
     <Button
         android:id="@+id/btnPickVideo"
         android:layout_width="match_parent"
@@ -97,40 +118,80 @@
         android:textSize="15sp" />
 
     <LinearLayout
+        android:id="@+id/layoutAdvancedAudioTools"
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
         android:layout_marginBottom="10dp"
-        android:orientation="horizontal">
+        android:orientation="vertical"
+        android:visibility="gone">
 
-        <Button
-            android:id="@+id/btnRecord"
-            android:layout_width="wrap_content"
+        <TextView
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="3dp"
-            android:layout_weight="1"
+            android:layout_marginBottom="8dp"
+            android:text="@string/manual_audio_tools"
+            android:textColor="@color/colorPrimary"
             android:textSize="15sp"
-            android:background="@drawable/rounded_button_background"
-            android:text="@string/record" />
+            android:textStyle="bold" />
 
-        <Button
-            android:id="@+id/btnPlay"
-            android:layout_width="wrap_content"
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="3dp"
-            android:layout_weight="1"
-            android:textSize="15sp"
-            android:background="@drawable/rounded_button_background"
-            android:text="@string/play" />
+            android:layout_marginBottom="12dp"
+            android:orientation="horizontal">
 
-        <Button
-            android:id="@+id/btnTranscb"
-            android:layout_width="wrap_content"
+            <TextView
+                android:layout_width="70dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="8dp"
+                android:layout_weight="1"
+                android:text="@string/input_file"
+                android:textColor="@color/colorPrimary"
+                android:textSize="15sp" />
+
+            <Spinner
+                android:id="@+id/spnrWaveFiles"
+                android:layout_width="0dp"
+                android:layout_height="wrap_content"
+                android:layout_marginEnd="4dp"
+                android:layout_weight="5" />
+        </LinearLayout>
+
+        <LinearLayout
+            android:layout_width="match_parent"
             android:layout_height="wrap_content"
-            android:layout_margin="3dp"
-            android:layout_weight="1"
-            android:textSize="15sp"
-            android:background="@drawable/rounded_button_background"
-            android:text="@string/transcribe" />
+            android:orientation="horizontal">
+
+            <Button
+                android:id="@+id/btnRecord"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="3dp"
+                android:layout_weight="1"
+                android:background="@drawable/rounded_button_background"
+                android:text="@string/record"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/btnPlay"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="3dp"
+                android:layout_weight="1"
+                android:background="@drawable/rounded_button_background"
+                android:text="@string/play"
+                android:textSize="15sp" />
+
+            <Button
+                android:id="@+id/btnTranscb"
+                android:layout_width="wrap_content"
+                android:layout_height="wrap_content"
+                android:layout_margin="3dp"
+                android:layout_weight="1"
+                android:background="@drawable/rounded_button_background"
+                android:text="@string/transcribe"
+                android:textSize="15sp" />
+        </LinearLayout>
     </LinearLayout>
 
     <LinearLayout
@@ -142,26 +203,26 @@
             android:id="@+id/tvStatusTitle"
             android:layout_width="wrap_content"
             android:layout_height="wrap_content"
-            android:textSize="15sp"
+            android:layout_marginEnd="8dp"
+            android:text="@string/status_label"
             android:textColor="@color/colorPrimary"
-            android:text="Status: "
-            android:layout_marginEnd="8dp" />
+            android:textSize="15sp" />
 
         <TextView
             android:id="@+id/tvStatus"
             android:layout_width="0dp"
             android:layout_height="wrap_content"
+            android:layout_marginStart="8dp"
             android:layout_weight="1"
-            android:textSize="15sp"
-            android:layout_marginStart="8dp" />
+            android:textSize="15sp" />
     </LinearLayout>
 
     <View
         android:layout_width="match_parent"
         android:layout_height="1dp"
-        android:background="@android:color/darker_gray"
         android:layout_marginTop="16dp"
-        android:layout_marginBottom="16dp" />
+        android:layout_marginBottom="16dp"
+        android:background="@android:color/darker_gray" />
 
     <ScrollView
         android:id="@+id/scrollView"
@@ -201,14 +262,14 @@
             android:textSize="12sp" />
     </ScrollView>
 
-    <!-- Add Floating Action Button -->
     <com.google.android.material.floatingactionbutton.FloatingActionButton
         android:id="@+id/fabCopy"
         android:layout_width="wrap_content"
         android:layout_height="wrap_content"
         android:layout_gravity="bottom|end"
         android:layout_margin="16dp"
+        android:contentDescription="@string/copy_result"
         android:src="@android:drawable/ic_menu_save"
-        android:contentDescription="Copy" />
+        android:tint="@android:color/white" />
 
 </LinearLayout>

@@ -1,5 +1,7 @@
 <resources>
     <string name="app_name">WhisperASR</string>
+    <string name="header_title">Whisper Subtitle Lab</string>
+    <string name="header_subtitle">Pick a model, then generate subtitles from a video.</string>
     <string name="transcribe">Transcribe</string>
     <string name="translate">Translate</string>
     <string name="record">Record</string>
@@ -28,6 +30,14 @@
     <string name="no_model_selected">No model selected.</string>
     <string name="invalid_vocab_file">Whisper vocab file is invalid: %1$s</string>
     <string name="output_language">Output language:</string>
+    <string name="select_model">Select model:</string>
+    <string name="input_file">Input file:</string>
+    <string name="manual_audio_tools">Manual audio tools</string>
+    <string name="audio_tools_menu">Audio tools menu</string>
+    <string name="show_audio_tools">Show audio tools</string>
+    <string name="hide_audio_tools">Hide audio tools</string>
+    <string name="status_label">Status:</string>
+    <string name="copy_result">Copy result</string>
     <string name="unsupported_video_type">Unsupported video type: %1$s</string>
     <string name="progress_log">Progress log</string>
     <string name="translation_failed">Translation failed, using transcription: %1$s</string>

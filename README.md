@@ -1,6 +1,10 @@
 # Offline Speech Recognition with Whisper & TFLite
 
-This repository offers two Android apps leveraging the OpenAI Whisper speech-to-text model. One app uses the TensorFlow Lite Java API for easy Java integration, while the other employs the TensorFlow Lite Native API for enhanced performance. It also includes a Python script for model generation and pre-built APKs for straightforward deployment.
+This repository offers two Android apps leveraging the OpenAI Whisper speech-to-text model. One app uses the TensorFlow Lite Java API for easy Java integration, while the other employs the TensorFlow Lite Native API for enhanced performance. It also includes Python tooling for model generation.
+
+This repository builds on the original Whisper TFLite implementation by Niranjan Yadla:
+
+- https://github.com/nyadla-sys/whisper.tflite
 
 
 ## 📂 Folder Structure
@@ -12,12 +16,8 @@ This repository offers two Android apps leveraging the OpenAI Whisper speech-to-
   An Android app utilizing the TensorFlow Lite Native API for model inference, offering optimized performance for developers preferring native code.
 
 - **models_and_scripts**:  
-  Contains a Python script to convert Whisper models into TensorFlow Lite format and includes pre-generated TFLite models.
+  Contains Python tooling to convert Whisper models into TensorFlow Lite format.
   - `generate_model.py`: Script for generating TFLite models.
-  - `generated_model`: Directory with optimized TFLite models.
-
-- **demo_and_apk**:  
-  Contains pre-built APKs for direct Android installation.
 
 ## 🚀 How to Use
 
@@ -123,12 +123,6 @@ Please adapt these code snippets to your specific use case, provide the correct 
 
 **Note**: Ensure that you have the necessary permissions, error handling, and file path management in your application when using the `Recorder` class.
 
-
-## Demo Video
-[![Video](https://img.youtube.com/vi/w9pohi9NQrg/0.jpg)](https://www.youtube.com/watch?v=w9pohi9NQrg)
-
-## Live Transcription
-[![Video](https://img.youtube.com/vi/qUg6_v7b9Io/0.jpg)](https://www.youtube.com/watch?v=qUg6_v7b9Io)
 
 ## Important Note
 

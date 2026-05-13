@@ -83,3 +83,10 @@ whisper_java/*.swo
 whisper_native/*.swo
 whisper_java/*.swn
 whisper_native/*.swn
+
+# Local artifacts and large local-only test data
+/demo_and_apk/
+/models_and_scripts/**
+!/models_and_scripts/
+!/models_and_scripts/**/
+!/models_and_scripts/**/*.py

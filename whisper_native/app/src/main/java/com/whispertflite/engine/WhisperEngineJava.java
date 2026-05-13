@@ -65,7 +65,8 @@ public class WhisperEngineJava implements WhisperEngine {
             Log.d(TAG, "Filters and Vocab are loaded..." + vocabPath);
         } else {
             mIsInitialized = false;
-            Log.d(TAG, "Failed to load Filters and Vocab...");
+            notifyProgress("Vocabulary file failed validation");
+            Log.e(TAG, "Failed to load Filters and Vocab from " + vocabPath);
         }
 
         return mIsInitialized;

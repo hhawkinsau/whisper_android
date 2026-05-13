@@ -51,12 +51,16 @@ import com.whispertflite.utils.AudioExtractionUtil;
 import com.whispertflite.utils.WaveUtil;
 
 import java.io.File;
+import java.io.FileInputStream;
 import java.io.FileOutputStream;
 import java.io.IOException;
 import java.io.InputStream;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
 import java.net.URL;
+import java.nio.ByteBuffer;
+import java.nio.ByteOrder;
+import java.nio.channels.FileChannel;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.Locale;
@@ -68,6 +72,9 @@ public class MainActivity extends AppCompatActivity {
             "https://huggingface.co/cik009/whisper/resolve/main/";
     private static final String HUGGING_FACE_DOWNLOAD_QUERY = "?download=true";
     private static final String DEFAULT_MODEL_TO_USE = "whisper-tiny.tflite";
+    private static final int WHISPER_VOCAB_MAGIC = 0x5553454e;
+    private static final int EXPECTED_N_MEL = 80;
+    private static final int EXPECTED_N_FFT_BINS = 201;
     private static final String LARGE_V3_MULTILINGUAL_VOCAB_FILE = "filters_vocab_multilingual-v3.bin";
     private static final int DOWNLOAD_BUFFER_SIZE = 1024 * 1024;
     // English only model ends with extension ".en.tflite"
@@ -423,6 +430,10 @@ public class MainActivity extends AppCompatActivity {
         }
         boolean isMultilingualModel = !(modelFile.getName().endsWith(ENGLISH_ONLY_MODEL_EXTENSION));
         File vocabFile = getRequiredVocabFile(modelFile);
+        if (!ensureVocabFileReady(vocabFile)) {
+            handler.post(() -> tvStatus.setText(getString(R.string.invalid_vocab_file, vocabFile.getName())));
+            return false;
+        }
         if (!vocabFile.exists()) {
             handler.post(() -> tvStatus.setText(selectedModelOption == null
                     ? getString(R.string.no_model_selected)
@@ -972,7 +983,8 @@ public class MainActivity extends AppCompatActivity {
         if (modelFile == null || !modelFile.exists()) {
             return false;
         }
-        return getRequiredVocabFile(modelFile).exists();
+        File vocabFile = getRequiredVocabFile(modelFile);
+        return vocabFile.exists() && isValidWhisperVocabFile(vocabFile);
     }
 
     private File getRequiredVocabFile(File modelFile) {
@@ -1072,6 +1084,10 @@ public class MainActivity extends AppCompatActivity {
                 }
             }
 
+            if (isWhisperVocabFileName(outputFile.getName()) && !isValidWhisperVocabFile(tempFile)) {
+                throw new IOException("Downloaded invalid vocab file " + outputFile.getName());
+            }
+
             if (!tempFile.renameTo(outputFile)) {
                 throw new IOException("Cannot finalize " + outputFile.getName());
             }
@@ -1148,18 +1164,20 @@ public class MainActivity extends AppCompatActivity {
                     if (assetFileName.endsWith("." + extension)) {
                         File outFile = new File(destFolder, assetFileName);
 
-                        // Skip if file already exists
-                        if (outFile.exists()) break;
+                        boolean needsCopy = !outFile.exists();
+                        if (!needsCopy && isWhisperVocabFileName(assetFileName) && !isValidWhisperVocabFile(outFile)) {
+                            Log.w(TAG, "Refreshing invalid bundled vocab file " + outFile.getAbsolutePath());
+                            needsCopy = true;
+                        }
+                        if (!needsCopy) {
+                            break;
+                        }
 
                         // Copy the file from assets to the destination folder
-                        try (InputStream inputStream = assetManager.open(assetFileName);
-                             OutputStream outputStream = new FileOutputStream(outFile)) {
-
-                            byte[] buffer = new byte[1024];
-                            int bytesRead;
-                            while ((bytesRead = inputStream.read(buffer)) != -1) {
-                                outputStream.write(buffer, 0, bytesRead);
-                            }
+                        try {
+                            copyAssetFile(assetManager, assetFileName, outFile);
+                        } catch (IOException e) {
+                            Log.e(TAG, "Failed to copy asset " + assetFileName, e);
                         }
                         break; // No need to check further extensions
                     }
@@ -1197,6 +1215,79 @@ public class MainActivity extends AppCompatActivity {
         long durationMs;
         File wavFile;
         final StringBuilder transcript = new StringBuilder();
+    }
+
+    private boolean ensureVocabFileReady(File vocabFile) {
+        if (!vocabFile.exists()) {
+            return false;
+        }
+        if (isValidWhisperVocabFile(vocabFile)) {
+            return true;
+        }
+        appendProgressLog("Detected invalid vocab file " + vocabFile.getName());
+        if (isBundledAssetVocabFile(vocabFile.getName())) {
+            appendProgressLog("Restoring bundled vocab " + vocabFile.getName());
+            try {
+                copyAssetFile(getAssets(), vocabFile.getName(), vocabFile);
+            } catch (IOException e) {
+                Log.e(TAG, "Failed to restore bundled vocab " + vocabFile.getName(), e);
+                return false;
+            }
+            boolean repaired = isValidWhisperVocabFile(vocabFile);
+            if (repaired) {
+                appendProgressLog("Restored bundled vocab " + vocabFile.getName());
+            }
+            return repaired;
+        }
+        return false;
+    }
+
+    private static void copyAssetFile(AssetManager assetManager, String assetFileName, File outFile) throws IOException {
+        File parent = outFile.getParentFile();
+        if (parent != null && !parent.exists() && !parent.mkdirs()) {
+            throw new IOException("Cannot create " + parent.getAbsolutePath());
+        }
+        try (InputStream inputStream = assetManager.open(assetFileName);
+             OutputStream outputStream = new FileOutputStream(outFile, false)) {
+            byte[] buffer = new byte[1024];
+            int bytesRead;
+            while ((bytesRead = inputStream.read(buffer)) != -1) {
+                outputStream.write(buffer, 0, bytesRead);
+            }
+        }
+    }
+
+    private static boolean isBundledAssetVocabFile(String fileName) {
+        return ENGLISH_ONLY_VOCAB_FILE.equalsIgnoreCase(fileName)
+                || MULTILINGUAL_VOCAB_FILE.equalsIgnoreCase(fileName);
+    }
+
+    private static boolean isWhisperVocabFileName(String fileName) {
+        String normalized = fileName.toLowerCase(Locale.US);
+        return normalized.startsWith("filters_vocab_") && normalized.endsWith(".bin");
+    }
+
+    private static boolean isValidWhisperVocabFile(File vocabFile) {
+        if (vocabFile == null || !vocabFile.exists() || vocabFile.length() < 12L) {
+            return false;
+        }
+        try (FileInputStream fileInputStream = new FileInputStream(vocabFile);
+             FileChannel fileChannel = fileInputStream.getChannel()) {
+            ByteBuffer header = ByteBuffer.allocate(12);
+            header.order(ByteOrder.nativeOrder());
+            int bytesRead = fileChannel.read(header);
+            if (bytesRead < 12) {
+                return false;
+            }
+            header.flip();
+            int magic = header.getInt();
+            int nMel = header.getInt();
+            int nFft = header.getInt();
+            return magic == WHISPER_VOCAB_MAGIC && nMel == EXPECTED_N_MEL && nFft == EXPECTED_N_FFT_BINS;
+        } catch (IOException e) {
+            Log.w(TAG, "Could not validate vocab file " + vocabFile.getAbsolutePath(), e);
+            return false;
+        }
     }
 
     static class SubtitleOutputOption {

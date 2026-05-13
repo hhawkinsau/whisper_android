@@ -26,6 +26,7 @@
     <string name="model_download_in_progress">Model download in progress...</string>
     <string name="model_ready">Model ready: %1$s</string>
     <string name="no_model_selected">No model selected.</string>
+    <string name="invalid_vocab_file">Whisper vocab file is invalid: %1$s</string>
     <string name="output_language">Output language:</string>
     <string name="unsupported_video_type">Unsupported video type: %1$s</string>
     <string name="progress_log">Progress log</string>

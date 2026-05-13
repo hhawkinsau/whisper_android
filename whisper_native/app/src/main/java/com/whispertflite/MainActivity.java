@@ -23,6 +23,7 @@ import android.view.ViewGroup;
 import android.widget.AdapterView;
 import android.widget.ArrayAdapter;
 import android.widget.Button;
+import android.widget.CheckBox;
 import android.widget.ImageButton;
 import android.widget.PopupMenu;
 import android.widget.ScrollView;
@@ -113,6 +114,7 @@ public class MainActivity extends AppCompatActivity {
     private Button btnTranscribe;
     private Button btnPickVideo;
     private Button btnDownloadModel;
+    private CheckBox checkboxSaveOriginalLanguage;
     private Spinner spinnerTflite;
     private Spinner spinnerWave;
     private Spinner spinnerOutputLanguage;
@@ -162,8 +164,7 @@ public class MainActivity extends AppCompatActivity {
     private ActivityResultLauncher<Intent> videoPickerLauncher;
     private ActivityResultLauncher<Intent> subtitleFolderLauncher;
     private VideoSubtitleJob pendingVideoSubtitleJob;
-    private String pendingSubtitleText;
-    private String pendingSubtitleFileName;
+    private final ArrayList<PendingSubtitleWrite> pendingSubtitleWrites = new ArrayList<>();
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -184,6 +185,7 @@ public class MainActivity extends AppCompatActivity {
         btnTranscribe = findViewById(R.id.btnTranscb);
         btnPickVideo = findViewById(R.id.btnPickVideo);
         btnDownloadModel = findViewById(R.id.btnDownloadModel);
+        checkboxSaveOriginalLanguage = findViewById(R.id.checkboxSaveOriginalLanguage);
         fabCopy = findViewById(R.id.fabCopy);
         btnToolsMenu = findViewById(R.id.btnToolsMenu);
         spinnerTflite = findViewById(R.id.spnrTfliteFiles);
@@ -623,6 +625,7 @@ public class MainActivity extends AppCompatActivity {
                 job.videoUri = videoUri;
                 job.videoDisplayName = getDisplayName(videoUri);
                 job.subtitleLanguageCode = selectedSubtitleOutputOption.languageCode;
+                job.saveOriginalLanguageSubtitle = checkboxSaveOriginalLanguage.isChecked();
                 job.durationMs = getDurationMs(videoUri);
                 job.wavFile = wavFile;
                 pendingVideoSubtitleJob = job;
@@ -667,31 +670,43 @@ public class MainActivity extends AppCompatActivity {
 
     private void finishVideoSubtitleJob(VideoSubtitleJob job) {
         new Thread(() -> {
-            String subtitleFileName = getSrtFileName(job.videoDisplayName, job.subtitleLanguageCode);
-            String finalTranscript = translateTranscriptIfNeeded(job.transcript.toString(), job.subtitleLanguageCode);
-            handler.post(() -> tvResult.setText(finalTranscript));
-            String srtText = buildSrt(finalTranscript, job.durationMs);
+            TranscriptProcessingResult transcriptResult =
+                    processTranscriptForOutput(job.transcript.toString(), job.subtitleLanguageCode);
+            handler.post(() -> tvResult.setText(transcriptResult.finalTranscript));
+            ArrayList<PendingSubtitleWrite> subtitleWrites = new ArrayList<>();
+            subtitleWrites.add(new PendingSubtitleWrite(
+                    getSrtFileName(job.videoDisplayName, job.subtitleLanguageCode),
+                    buildSrt(transcriptResult.finalTranscript, job.durationMs)));
+            if (job.saveOriginalLanguageSubtitle
+                    && !TextUtils.isEmpty(transcriptResult.detectedSourceLanguageCode)
+                    && !"und".equalsIgnoreCase(transcriptResult.detectedSourceLanguageCode)
+                    && !job.subtitleLanguageCode.equalsIgnoreCase(transcriptResult.detectedSourceLanguageCode)
+                    && !transcriptResult.finalTranscript.equals(transcriptResult.sourceTranscript)) {
+                subtitleWrites.add(new PendingSubtitleWrite(
+                        getSrtFileName(job.videoDisplayName, transcriptResult.detectedSourceLanguageCode),
+                        buildSrt(transcriptResult.sourceTranscript, job.durationMs)));
+            }
             try {
-                appendProgressLog("Saving subtitle beside source as " + subtitleFileName);
-                Uri srtUri = createSiblingSubtitleUri(job.videoUri, subtitleFileName);
-                writeTextToUri(srtUri, srtText);
-                handler.post(() -> tvStatus.setText(getString(R.string.srt_saved_beside_video, subtitleFileName)));
+                saveSubtitleWritesBesideSource(job.videoUri, subtitleWrites);
+                String savedNames = joinSubtitleFileNames(subtitleWrites);
+                handler.post(() -> tvStatus.setText(getString(R.string.srt_saved_beside_video, savedNames)));
                 appendProgressLog("Saved subtitle beside source video");
                 resetVideoSubtitleJob();
             } catch (Exception e) {
                 Log.w(TAG, "Direct sibling SRT save failed; requesting folder permission", e);
-                pendingSubtitleText = srtText;
-                pendingSubtitleFileName = subtitleFileName;
+                pendingSubtitleWrites.clear();
+                pendingSubtitleWrites.addAll(subtitleWrites);
                 appendProgressLog("Direct save failed, requesting folder permission");
-                handler.post(() -> requestSubtitleFolderPermission(subtitleFileName));
+                handler.post(() -> requestSubtitleFolderPermission(joinSubtitleFileNames(subtitleWrites)));
             }
         }).start();
     }
 
     private void finishManualTranscriptJob() {
         new Thread(() -> {
-            String translatedText = translateTranscriptIfNeeded(latestTranscriptText, selectedSubtitleOutputOption.languageCode);
-            handler.post(() -> tvResult.setText(translatedText));
+            TranscriptProcessingResult transcriptResult =
+                    processTranscriptForOutput(latestTranscriptText, selectedSubtitleOutputOption.languageCode);
+            handler.post(() -> tvResult.setText(transcriptResult.finalTranscript));
         }).start();
     }
 
@@ -724,23 +739,25 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void writePendingSubtitleToTree(Uri treeUri) {
-        String subtitleText = pendingSubtitleText;
-        String subtitleFileName = pendingSubtitleFileName;
-        if (subtitleText == null || subtitleFileName == null) {
+        if (pendingSubtitleWrites.isEmpty()) {
             return;
         }
+        ArrayList<PendingSubtitleWrite> writesToSave = new ArrayList<>(pendingSubtitleWrites);
 
         new Thread(() -> {
             try {
                 String treeDocumentId = DocumentsContract.getTreeDocumentId(treeUri);
                 Uri parentUri = DocumentsContract.buildDocumentUriUsingTree(treeUri, treeDocumentId);
-                Uri subtitleUri = DocumentsContract.createDocument(
-                        getContentResolver(), parentUri, "application/x-subrip", subtitleFileName);
-                if (subtitleUri == null) {
-                    throw new IOException("Cannot create subtitle in selected folder");
+                for (PendingSubtitleWrite pendingWrite : writesToSave) {
+                    Uri subtitleUri = DocumentsContract.createDocument(
+                            getContentResolver(), parentUri, "application/x-subrip", pendingWrite.fileName);
+                    if (subtitleUri == null) {
+                        throw new IOException("Cannot create subtitle in selected folder");
+                    }
+                    writeTextToUri(subtitleUri, pendingWrite.subtitleText);
                 }
-                writeTextToUri(subtitleUri, subtitleText);
-                handler.post(() -> tvStatus.setText(getString(R.string.srt_saved_to_folder, subtitleFileName)));
+                String savedNames = joinSubtitleFileNames(writesToSave);
+                handler.post(() -> tvStatus.setText(getString(R.string.srt_saved_to_folder, savedNames)));
                 appendProgressLog("Saved subtitle to selected folder");
             } catch (Exception e) {
                 Log.e(TAG, "Failed to write subtitle to selected folder", e);
@@ -763,8 +780,7 @@ public class MainActivity extends AppCompatActivity {
     }
 
     private void clearPendingSubtitleWrite() {
-        pendingSubtitleText = null;
-        pendingSubtitleFileName = null;
+        pendingSubtitleWrites.clear();
     }
 
     private String buildSrt(String transcript, long durationMs) {
@@ -826,9 +842,12 @@ public class MainActivity extends AppCompatActivity {
         return "'" + path.replace("'", "'\\''") + "'";
     }
 
-    private String translateTranscriptIfNeeded(String transcript, String targetLanguageCode) {
-        if (TextUtils.isEmpty(transcript) || TextUtils.isEmpty(targetLanguageCode)) {
-            return transcript;
+    private TranscriptProcessingResult processTranscriptForOutput(String transcript, String targetLanguageCode) {
+        TranscriptProcessingResult result = new TranscriptProcessingResult();
+        result.sourceTranscript = transcript == null ? "" : transcript;
+        result.finalTranscript = result.sourceTranscript;
+        if (TextUtils.isEmpty(result.sourceTranscript) || TextUtils.isEmpty(targetLanguageCode)) {
+            return result;
         }
 
         try {
@@ -840,23 +859,24 @@ public class MainActivity extends AppCompatActivity {
             } finally {
                 languageIdentifier.close();
             }
+            result.detectedSourceLanguageCode = sourceLanguageCode;
 
             if (TextUtils.isEmpty(sourceLanguageCode) || "und".equals(sourceLanguageCode)) {
                 appendProgressLog("Language identification was inconclusive; keeping transcript");
-                return transcript;
+                return result;
             }
 
             appendProgressLog("Detected transcript language " + sourceLanguageCode);
             if (targetLanguageCode.equalsIgnoreCase(sourceLanguageCode)) {
                 appendProgressLog("Target language already matches transcript");
-                return transcript;
+                return result;
             }
 
             String sourceTranslateLanguage = TranslateLanguage.fromLanguageTag(sourceLanguageCode);
             String targetTranslateLanguage = TranslateLanguage.fromLanguageTag(targetLanguageCode);
             if (sourceTranslateLanguage == null || targetTranslateLanguage == null) {
                 appendProgressLog("Translation language mapping unavailable; keeping transcript");
-                return transcript;
+                return result;
             }
 
             handler.post(() -> tvStatus.setText(getString(R.string.translating_subtitles, targetLanguageCode)));
@@ -869,9 +889,10 @@ public class MainActivity extends AppCompatActivity {
             try {
                 Tasks.await(translator.downloadModelIfNeeded(new DownloadConditions.Builder().build()));
                 appendProgressLog("Translation model ready; translating transcript");
-                String translatedText = Tasks.await(translator.translate(transcript));
+                String translatedText = Tasks.await(translator.translate(result.sourceTranscript));
                 appendProgressLog("Translation complete");
-                return translatedText;
+                result.finalTranscript = translatedText;
+                return result;
             } finally {
                 translator.close();
             }
@@ -879,8 +900,27 @@ public class MainActivity extends AppCompatActivity {
             Log.e(TAG, "Failed to translate transcript", e);
             handler.post(() -> tvStatus.setText(getString(R.string.translation_failed, e.getMessage())));
             appendProgressLog("Translation failed; using transcript");
-            return transcript;
+            return result;
         }
+    }
+
+    private void saveSubtitleWritesBesideSource(Uri videoUri, ArrayList<PendingSubtitleWrite> subtitleWrites) throws IOException {
+        for (PendingSubtitleWrite pendingWrite : subtitleWrites) {
+            appendProgressLog("Saving subtitle beside source as " + pendingWrite.fileName);
+            Uri srtUri = createSiblingSubtitleUri(videoUri, pendingWrite.fileName);
+            writeTextToUri(srtUri, pendingWrite.subtitleText);
+        }
+    }
+
+    private String joinSubtitleFileNames(ArrayList<PendingSubtitleWrite> subtitleWrites) {
+        StringBuilder builder = new StringBuilder();
+        for (int i = 0; i < subtitleWrites.size(); i++) {
+            if (i > 0) {
+                builder.append(", ");
+            }
+            builder.append(subtitleWrites.get(i).fileName);
+        }
+        return builder.toString();
     }
 
     private void clearProgressLog() {
@@ -1246,9 +1286,20 @@ public class MainActivity extends AppCompatActivity {
         Uri videoUri;
         String videoDisplayName;
         String subtitleLanguageCode;
+        boolean saveOriginalLanguageSubtitle;
         long durationMs;
         File wavFile;
         final StringBuilder transcript = new StringBuilder();
+    }
+
+    static class PendingSubtitleWrite {
+        final String fileName;
+        final String subtitleText;
+
+        PendingSubtitleWrite(String fileName, String subtitleText) {
+            this.fileName = fileName;
+            this.subtitleText = subtitleText;
+        }
     }
 
     private boolean ensureVocabFileReady(File vocabFile) {
@@ -1338,6 +1389,12 @@ public class MainActivity extends AppCompatActivity {
         public String toString() {
             return displayName + " (" + languageCode + ")";
         }
+    }
+
+    static class TranscriptProcessingResult {
+        String sourceTranscript = "";
+        String finalTranscript = "";
+        String detectedSourceLanguageCode = "";
     }
 
     static class ModelOption {

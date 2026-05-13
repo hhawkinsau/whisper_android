@@ -30,6 +30,7 @@
     <string name="no_model_selected">No model selected.</string>
     <string name="invalid_vocab_file">Whisper vocab file is invalid: %1$s</string>
     <string name="output_language">Output language:</string>
+    <string name="save_original_language_subtitle">Also save original-language subtitle when it differs from output language</string>
     <string name="select_model">Select model:</string>
     <string name="input_file">Input file:</string>
     <string name="manual_audio_tools">Manual audio tools</string>

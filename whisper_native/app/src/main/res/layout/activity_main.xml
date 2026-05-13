@@ -56,7 +56,7 @@
     <LinearLayout
         android:layout_width="match_parent"
         android:layout_height="wrap_content"
-        android:layout_marginBottom="16dp"
+        android:layout_marginBottom="8dp"
         android:orientation="horizontal">
 
         <TextView
@@ -107,6 +107,14 @@
             android:layout_marginEnd="4dp"
             android:layout_weight="5" />
     </LinearLayout>
+
+    <CheckBox
+        android:id="@+id/checkboxSaveOriginalLanguage"
+        android:layout_width="match_parent"
+        android:layout_height="wrap_content"
+        android:layout_marginBottom="12dp"
+        android:text="@string/save_original_language_subtitle"
+        android:textSize="14sp" />
 
     <Button
         android:id="@+id/btnPickVideo"

@@ -15,7 +15,6 @@ import org.tensorflow.lite.Tensor;
 //import org.tensorflow.lite.gpu.CompatibilityList;
 //import org.tensorflow.lite.gpu.GpuDelegate;
 //import org.tensorflow.lite.nnapi.NnApiDelegate;
-import org.tensorflow.lite.support.tensorbuffer.TensorBuffer;
 
 import java.io.FileInputStream;
 import java.io.IOException;
@@ -200,16 +199,19 @@ public class WhisperEngineJava implements WhisperEngine {
 
         // Create input tensor
         Tensor inputTensor = mInterpreter.getInputTensor(0);
-        TensorBuffer inputBuffer = TensorBuffer.createFixedSize(inputTensor.shape(), inputTensor.dataType());
-//        printTensorDump("Input Tensor Dump ===>", inputTensor);
+        if (inputTensor.dataType() != DataType.FLOAT32) {
+            throw new IllegalStateException("Unexpected Whisper input type: " + inputTensor.dataType());
+        }
 
         // Create output tensor
         Tensor outputTensor = mInterpreter.getOutputTensor(0);
-        TensorBuffer outputBuffer = TensorBuffer.createFixedSize(outputTensor.shape(), outputTensor.dataType());
-//        printTensorDump("Output Tensor Dump ===>", outputTensor);
+        if (outputTensor.dataType() != DataType.INT32) {
+            throw new IllegalStateException("Unexpected Whisper output type: " + outputTensor.dataType());
+        }
+        int[] outputTokens = new int[outputTensor.numElements()];
 
         // Load input data
-        int inputSize = inputTensor.shape()[0] * inputTensor.shape()[1] * inputTensor.shape()[2] * Float.BYTES;
+        int inputSize = inputTensor.numElements() * Float.BYTES;
         ByteBuffer inputBuf = ByteBuffer.allocateDirect(inputSize);
         inputBuf.order(ByteOrder.nativeOrder());
         for (float input : inputData) {
@@ -225,18 +227,10 @@ public class WhisperEngineJava implements WhisperEngine {
 //            throw new RuntimeException(e);
 //        }
 
-        inputBuffer.loadBuffer(inputBuf);
-
 //        Log.d(TAG, "Before inference...");
         // Run inference
-        mInterpreter.run(inputBuffer.getBuffer(), outputBuffer.getBuffer());
+        mInterpreter.run(inputBuf, outputTokens);
 //        Log.d(TAG, "After inference...");
-
-        // Retrieve the results
-        if (outputTensor.dataType() != DataType.INT32) {
-            throw new IllegalStateException("Unexpected Whisper output type: " + outputTensor.dataType());
-        }
-        int[] outputTokens = outputBuffer.getIntArray();
         int outputLen = outputTokens.length;
         Log.d(TAG, "output_len: " + outputLen);
         StringBuilder result = new StringBuilder();
